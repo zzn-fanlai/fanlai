@@ -82,7 +82,15 @@ const persist = debounce(() => {
   }
 }, 120);
 
+/** 批量变更：期间不触发重渲染，结束后只通知一次 */
+let batching = 0;
+let notifyPending = false;
+
 function notify() {
+  if (batching > 0) {
+    notifyPending = true;
+    return;
+  }
   for (const fn of subs) {
     try {
       fn(state);
@@ -145,15 +153,22 @@ export const store = {
 
   setRoom(room) {
     state.room = room;
-    if (room && !state.data.rooms.find((r) => r.code === room.code)) {
-      state.data.rooms.push({
-        id: room.code,
-        code: room.code,
-        created_at: room.createdAt || nowMs(),
-        updated_at: nowMs(),
-        updated_by: state.profile?.deviceId || "local",
-        deleted: false,
-      });
+    if (room) {
+      const existing = state.data.rooms.find((r) => r.code === room.code);
+      if (!existing) {
+        const now = nowMs();
+        const row = {
+          id: room.code,
+          code: room.code,
+          created_at: room.createdAt || now,
+          updated_at: now,
+          updated_by: state.profile?.deviceId || "local",
+          deleted: false,
+        };
+        state.data.rooms.push(row);
+        // 关键：房间行也必须进推送队列，否则对端查不到房间码
+        markDirty("rooms", row.id);
+      }
     }
     persist();
     notify();
@@ -294,6 +309,20 @@ export const store = {
   /** 立即落盘（同步游标等易失字段用） */
   saveNow() {
     persist.flush();
+  },
+
+  /** 批量写入：合并通知，避免一次同步触发多次重渲染（支持 async） */
+  async batch(fn) {
+    batching++;
+    try {
+      return await fn();
+    } finally {
+      batching--;
+      if (batching === 0 && notifyPending) {
+        notifyPending = false;
+        notify();
+      }
+    }
   },
 
   markClean(entries) {

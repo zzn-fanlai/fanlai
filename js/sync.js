@@ -7,7 +7,7 @@
    ============================================================ */
 import { store, TABLES } from "./store.js";
 
-const PULL_INTERVAL = 5000;
+const PULL_INTERVAL = 8000;
 const PUSH_DEBOUNCE = 1200;
 const MAX_BACKOFF = 60000;
 
@@ -113,9 +113,12 @@ export const sync = {
       return { ok: false, reason: msg };
     } finally {
       running = false;
-      if (queued) {
+      // 只有"还有脏数据"或"期间被请求过"时才补跑一次；
+      // 否则会在慢网络上变成永久"同步中"（每轮耗时 > 轮询间隔 → 永远在跑）
+      if (queued || store.dirtyCount() > 0) {
         queued = false;
-        setTimeout(() => this.run(), 400);
+        clearTimeout(pushTimer);
+        pushTimer = setTimeout(() => this.run(), 700);
       }
     }
   },
@@ -192,25 +195,42 @@ function stripLocal(row) {
    - 新版 publishable：sb_publishable_... —— 只需 apikey 头，带 Bearer 反而可能被拒
    这里按 key 形态自动选择，并在 401/403 时自动换一种再试一次。
    ============================================================ */
-export async function sbFetch(url, key, { method = "GET", body, prefer, headers = {} } = {}) {
+export async function sbFetch(url, key, { method = "GET", body, prefer, headers = {}, timeout = 15000 } = {}) {
   const legacy = /^eyJ/.test(key);
+  const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), timeout) : null;
+
   const build = (withBearer) => {
     const h = { ...headers, apikey: key };
     if (withBearer) h.Authorization = `Bearer ${key}`;
     if (prefer) h.Prefer = prefer;
-    return { method, headers: h, body: body === undefined ? undefined : JSON.stringify(body) };
+    return {
+      method,
+      headers: h,
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: ctrl ? ctrl.signal : undefined,
+    };
   };
 
-  let res = await fetch(url, build(legacy));
-  if (!legacy && (res.status === 401 || res.status === 403)) {
-    try {
-      await res.text();
-    } catch (_) {
-      /* 释放连接 */
+  try {
+    let res = await fetch(url, build(legacy));
+    if (!legacy && (res.status === 401 || res.status === 403)) {
+      try {
+        await res.text();
+      } catch (_) {
+        /* 释放连接 */
+      }
+      res = await fetch(url, build(true));
     }
-    res = await fetch(url, build(true));
+    return res;
+  } catch (err) {
+    if (err && (err.name === "AbortError" || /aborted/i.test(err.message || ""))) {
+      throw new Error(`请求超时（${Math.round(timeout / 1000)} 秒没响应）：${url.replace(/^https?:\/\//, "").split("?")[0]}`);
+    }
+    throw new Error(`网络请求失败：${err?.message || err}`);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
-  return res;
 }
 
 async function rest(table, { query = "", method = "GET", body, prefer } = {}) {
@@ -262,13 +282,13 @@ async function push() {
 
 async function pull() {
   const c = sync.config();
-  for (const table of TABLES) {
+
+  // 8 个表并行拉取（之前是串行，手机上跑满一轮会超过轮询间隔，看起来永远在"同步中"）
+  const tasks = TABLES.map(async (table) => {
     if (table === "rooms") {
-      // rooms 用 code 作为房间标识，单独处理
-      const q = `?select=*&code=eq.${encodeURIComponent(c.room)}`;
-      const rows = await rest("rooms", { query: q });
-      if (rows.length) store.applyRemote("rooms", rows);
-      continue;
+      const rows = await rest("rooms", { query: `?select=*&code=eq.${encodeURIComponent(c.room)}` });
+      if (Array.isArray(rows) && rows.length) store.applyRemote("rooms", rows);
+      return;
     }
     const cursor = Number(store.state.sync.cursor[table] || 0);
     const q =
@@ -280,7 +300,9 @@ async function pull() {
       const max = rows.reduce((m, r) => Math.max(m, Number(r.updated_at) || 0), 0);
       store.state.sync.cursor[table] = Math.max(0, max - 1000);
     }
-  }
+  });
+
+  await store.batch(() => Promise.all(tasks));
   store.saveNow();
 }
 

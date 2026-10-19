@@ -16,7 +16,7 @@ import {
 import { downloadBlob } from "../lib/exportImage.js";
 import { statsFor } from "../lib/model.js";
 
-const APP_VERSION = "1.0.0";
+const APP_VERSION = "1.0.1";
 
 /* ============================================================
    我的（首页）
@@ -198,34 +198,42 @@ export function profile() {
 /* ============================================================
    同步设置
    ============================================================ */
-export function syncPage() {
-  const cfg = sync.config();
+/* ==== 同步状态卡片（会随状态实时刷新） ==== */
+function syncStateBox() {
   const st = sync.status;
   const enabled = sync.enabled();
-
   const phaseText = !enabled
     ? "仅本机模式"
     : st.phase === "syncing"
-    ? "同步中…"
+    ? "正在同步…"
     : st.phase === "error"
     ? "同步失败"
     : st.phase === "offline"
-    ? "离线"
+    ? "离线（等网络恢复）"
     : "已同步";
+
+  const pending = store.dirtyCount();
+  const body = enabled
+    ? `当前状态：<b>${esc(phaseText)}</b>${
+        st.lastSyncAt ? ` · 上次 ${esc(fmtAgo(st.lastSyncAt))}` : ""
+      }${pending ? `<br>待上传 <b>${pending}</b> 项` : ""}${
+        st.lastError ? `<br><span style="color:var(--danger)">${esc(st.lastError)}</span>` : ""
+      }`
+    : "还没配置云端。现在数据只在这台手机上，TA 看不到。";
+
+  return notice(body, enabled ? (st.phase === "error" ? "err" : "ok") : "warn");
+}
+
+export function syncPage() {
+  const cfg = sync.config();
+  const enabled = sync.enabled();
 
   return {
     title: "同步设置",
     back: "#/me",
     tab: "me",
     html: `
-      ${notice(
-        enabled
-          ? `当前状态：<b>${esc(phaseText)}</b>${st.lastSyncAt ? ` · 上次 ${esc(fmtAgo(st.lastSyncAt))}` : ""}${
-              st.lastError ? `<br><span style="color:var(--danger)">${esc(st.lastError)}</span>` : ""
-            }${store.dirtyCount() ? `<br>待上传 ${store.dirtyCount()} 项` : ""}`
-          : "还没配置云端。现在数据只在这台手机上，TA 看不到。",
-        enabled ? "ok" : "warn"
-      )}
+      <div id="sync-state">${syncStateBox()}</div>
 
       <div class="card">
         <div class="card-title">Supabase 配置</div>
@@ -266,10 +274,10 @@ export function syncPage() {
       <div class="card flat">
         <div class="card-title">怎么拿到这两个值</div>
         <ol class="small muted" style="line-height:1.9;padding-left:18px">
-          <li>打开 supabase.com 注册登录</li>
-          <li>New project → 填名字和密码 → 建好后等 2 分钟</li>
+          <li>打开 supabase.com 注册登录（国内打不开就换网络/热点）</li>
+          <li>New project → 名字 fanlai → 地区选 Singapore → 建好后等 2 分钟</li>
           <li>左侧 SQL Editor → 粘贴 <code>supabase/schema.sql</code> 的内容 → Run</li>
-          <li>Project Settings → API → 复制 Project URL 和 anon public key</li>
+          <li>Settings → API Keys → 复制 Project URL 和 <b>Publishable</b> key</li>
           <li>粘到上面两个框 → 保存 → 测试连接</li>
         </ol>
       </div>
@@ -278,7 +286,10 @@ export function syncPage() {
       async test() {
         const form = document.querySelector("#view form");
         const fd = new FormData(form);
-        store.setSyncConfig({ url: String(fd.get("url") || "").trim(), key: String(fd.get("key") || "").trim() });
+        store.setSyncConfig({
+          url: sync.normalizeUrl(String(fd.get("url") || "")),
+          key: String(fd.get("key") || "").trim(),
+        });
         toast("正在测试…");
         const r = await sync.test();
         if (r.ok) toast("连上了 ✅", "ok");
@@ -286,7 +297,7 @@ export function syncPage() {
       },
       "save-sync"(form) {
         const fd = new FormData(form);
-        const url = String(fd.get("url") || "").trim();
+        const url = sync.normalizeUrl(String(fd.get("url") || ""));
         const key = String(fd.get("key") || "").trim();
         if (!url || !key) {
           toast("两个都要填");
@@ -295,7 +306,6 @@ export function syncPage() {
         store.setSyncConfig({ url, key, lastError: "" });
         toast("已保存，开始同步", "ok");
         sync.run({ force: true });
-        setTimeout(rerender, 600);
       },
       async "copy-code"() {
         const ok = await copyText(store.state.room?.code || "");
@@ -305,15 +315,26 @@ export function syncPage() {
         toast("同步中…");
         const r = await sync.run({ force: true });
         toast(r.ok ? "同步完成" : `同步失败：${r.reason}`, r.ok ? "ok" : "err");
-        rerender();
       },
       async rescan() {
         store.setSyncConfig({ cursor: {} });
         toast("已重置游标，正在全量拉取");
         const r = await sync.run({ force: true });
         toast(r.ok ? "拉取完成" : `失败：${r.reason}`, r.ok ? "ok" : "err");
-        rerender();
       },
+    },
+    afterRender(root) {
+      // 状态实时刷新，不需要重新进页面
+      const box = root.querySelector("#sync-state");
+      if (!box) return;
+      const off = sync.onStatus(() => {
+        const el = document.getElementById("sync-state");
+        if (!el) {
+          off();
+          return;
+        }
+        el.innerHTML = syncStateBox();
+      });
     },
   };
 }
