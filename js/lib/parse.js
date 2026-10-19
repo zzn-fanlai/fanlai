@@ -58,7 +58,7 @@ const NOISE_LINE = [
   /^(编辑于|发布于|IP属地|同款|猜你喜欢|相关推荐|广告)/,
   /^(@|＠)\S{1,20}\s*$/,
   // 纯话题标签行 / 日期地点 / 评论提示 / 按钮占位
-  /^(\s*#[^\s#]+)+\s*$/,
+  /^(\s*#\s*[^\s#]+)+\s*$/,
   /^\d{1,2}\s*月\s*\d{1,2}\s*日/,
   /^共\s*\d+\s*条评论/,
   /^(说点什么|不喜欢|回复|查看更多|写评论)/,
@@ -448,17 +448,34 @@ export function classifySegments(text) {
    ============================================================ */
 
 const ING_SECTION_RE =
-  /^(食材|用料|材料|所需材料|所需食材|配料|主料|辅料|原料|调料|调味料|佐料|调味|腌料)[：:\s]/;
+  /^(食材|用料|材料|所需材料|所需食材|配料|主料|辅料|原料|调料|调味料|佐料|调味|腌料)\s*[：:]?\s*/;
 const STEP_SECTION_RE =
-  /^(做法|步骤|制作方法|制作步骤|做法步骤|操作步骤|烹饪步骤|小贴士|注意事项|提示|教程)[：:\s]/;
+  /^(做法|步骤|制作方法|制作步骤|做法步骤|操作步骤|烹饪步骤|小贴士|注意事项|提示|教程)\s*[：:]?\s*/;
 
-/** "1：" "2." "3、" "2 制作烧椒" 都算步骤开头 */
+/** "1：" "2." "3、" "2 制作烧椒" "1排骨清水…" 都算步骤开头 */
 function isStepStart(line) {
   const s = String(line || "").trim();
   if (/^[0-9]{1,2}\s*[:：、.）)]\s*\S/.test(s)) return true;
   if (/^[0-9]{1,2}\s+\S/.test(s)) return true;
   if (/^[①②③④⑤⑥⑦⑧⑨⑩]\s*\S/.test(s)) return true;
+  // OCR 常见：数字紧贴汉字（"1排骨清水…"），用长度排除 "3分钟" 这类
+  if (/^[0-9]{1,2}(?![0-9.])\s*[\u4e00-\u9fa5]/.test(s) && s.length >= 15) return true;
   return false;
+}
+
+/** 单字也合法的食材 */
+const ONE_CHAR_OK = new Set("蒜姜葱盐糖油醋蛋米面水蜜椒肉鱼虾菜豆粉奶果菇笋藕梨桃橙茶酒".split(""));
+/** 句子开头词：以这些开头的基本不是食材名 */
+const SENTENCE_START = /^(将|把|用|并|还|再|然后|接着|可以|适量|少许|最后|同时|另|取|锅|热锅)/;
+
+function isPlausibleIngredientName(name) {
+  const n = String(name || "").trim();
+  if (!n) return false;
+  if (n.length > 14) return false;
+  if (COOK_VERB.test(n) && n.length > 5) return false;
+  if (n.length === 1 && !ONE_CHAR_OK.has(n)) return false;
+  if (n.length > 4 && SENTENCE_START.test(n)) return false;
+  return true;
 }
 
 /** 去掉括号补充说明，并拆成多条食材 */
@@ -468,11 +485,16 @@ function splitIngredientText(text) {
     .replace(/^[\s·•\-—*、，,]+/, "")
     .trim();
   if (!cleaned) return [];
-  let pieces = cleaned.split(/[、，,；;／/]+/);
-  if (pieces.length === 1 && cleaned.replace(/\s/g, "").length > 12) {
-    pieces = cleaned.split(/\s+/);
+
+  let pieces = cleaned.split(/[、，,；;／/]+/).filter((p) => p.trim());
+  // Tesseract 常把食材用空格隔开（"排骨 螺丝椒 小米辣"）
+  if (pieces.length <= 1) {
+    const parts = cleaned.split(/\s+/).filter(Boolean);
+    if (parts.length > 1 && parts.every((p) => p.length <= 8)) pieces = parts;
   }
-  return pieces.map((p) => p.trim()).filter((p) => p && p.length <= 14 && !looksLikeStep(p));
+  return pieces
+    .map((p) => p.trim())
+    .filter((p) => p && p.length <= 14 && !looksLikeStep(p) && isPlausibleIngredientName(p));
 }
 
 function cleanStepText(text) {

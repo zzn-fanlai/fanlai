@@ -23,7 +23,7 @@ import {
   inferIngCategory,
 } from "../lib/catalog.js";
 import { parseRecipe, detectPlatform } from "../lib/parse.js";
-import { recognizeImage } from "../lib/ocr.js";
+import { recognizeImage, assessOcrQuality } from "../lib/ocr.js";
 import { qtyText } from "../lib/ingredients.js";
 import { toast, notice, confirmAction, emptyState, chipRow, rerender } from "../ui/kit.js";
 import { dishRow, ingredientList, stepList, sectionTitle } from "../ui/parts.js";
@@ -443,6 +443,7 @@ export function importPage(ctx) {
     importState.deepText = deepText;
     importState.raw = deepText;
     importState.parsed = parseRecipe(deepText);
+    importState.quality = assessOcrQuality(deepText, importState.parsed);
     importState.step = "confirm";
   }
 
@@ -458,7 +459,24 @@ export function importPage(ctx) {
       tab: "cook",
       html: `
         ${notice(`识别到 <b>${conf.ingredients}</b> 样食材、<b>${conf.steps}</b> 步做法。${level.text}`, level.kind)}
+        ${
+          importState.quality && !importState.quality.ok
+            ? notice(
+                `⚠️ 这次识别质量不太好（得分 ${importState.quality.score}）：${esc(
+                  (importState.quality.hints || []).join("；")
+                )}<br>建议逐条核对，或者回上一页改成「相册长按复制文字 → 粘贴」，准确率会高很多。`,
+                "warn"
+              )
+            : ""
+        }
         ${editorHtml({ dish: { ...p, id: "" }, mode: "new" })}
+        <details class="card flat mt-16">
+          <summary class="small muted" style="cursor:pointer">查看识别到的原始文字（识别不对时点开复制发我）</summary>
+          <textarea class="input mt-6" id="raw-echo" readonly style="min-height:140px;font-size:12px">${esc(
+            importState.raw || ""
+          )}</textarea>
+          <button class="btn btn-sm btn-block mt-6" data-act="copy-raw">复制原文</button>
+        </details>
         <button class="btn btn-ghost btn-block mt-6" data-act="back-input">换一段文案</button>
       `,
       actions: {
@@ -466,6 +484,10 @@ export function importPage(ctx) {
         "back-input"() {
           importState.step = "input";
           rerender();
+        },
+        async "copy-raw"() {
+          const ok = await copyText(importState.raw || "");
+          toast(ok ? "已复制，粘给我看看" : "复制失败", ok ? "ok" : "err");
         },
         "save-dish"(form) {
           const data = readEditor(form);
@@ -539,6 +561,7 @@ export function importPage(ctx) {
         importState.raw = raw;
         const parsed = parseRecipe(raw);
         importState.parsed = parsed;
+        importState.quality = assessOcrQuality(text, parsed);
         importState.step = "confirm";
         rerender();
       },
@@ -597,7 +620,8 @@ export function importPage(ctx) {
             setStatus("识别完成，正在解析…");
             const parsed = parseRecipe(text);
             importState.parsed = parsed;
-            importState.step = "confirm";
+        importState.quality = assessOcrQuality(text, parsed);
+        importState.step = "confirm";
             rerender();
           } catch (err) {
             setStatus(err?.message || String(err));

@@ -57,13 +57,16 @@ async function ensureTesseract() {
   return scriptPromise;
 }
 
-/** 清理 OCR 常见噪声：中文之间多余空格、全角数字、水印行 */
+/** 清理 OCR 常见噪声：全角数字、标点两侧空格、水印行
+ *  注意：不能把中文字之间的空格全删掉 —— Tesseract 用空格分隔食材条目
+ *  （"排骨 螺丝椒"），删了就会粘成一个词。每字一空格的极端情况交给解析器容忍。
+ */
 export function cleanOcrText(raw) {
   let t = String(raw || "");
   // 全角数字/字母 → 半角
   t = t.replace(/[０-９Ａ-Ｚａ-ｚ]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xfee0));
-  // 中文之间的空格（OCR 很爱插）
-  t = t.replace(/([\u4e00-\u9fa5])\s+(?=[\u4e00-\u9fa5])/g, "$1");
+  // 标点两侧的空格
+  t = t.replace(/[ \t]*([，。；：！？、,.!?;:])[ \t]*/g, "$1");
   // 行首行尾空白
   t = t
     .split("\n")
@@ -73,12 +76,55 @@ export function cleanOcrText(raw) {
       // 纯装饰/水印行
       if (/^[·•—\-_=*~.]{2,}$/.test(l)) return false;
       if (/^(小红书|抖音|关注|点赞|收藏|分享|评论|展开|全文|广告)/.test(l) && l.length <= 12) return false;
+      // 纯符号/表情行
+      if (!/[\u4e00-\u9fa5A-Za-z0-9]/.test(l)) return false;
       return true;
     })
     .join("\n");
   // 压缩空行
   t = t.replace(/\n{3,}/g, "\n\n");
   return t.trim();
+}
+
+/** 判断识别质量：返回 { ok, score, hints[] } —— 太差就别急着存 */
+export function assessOcrQuality(text, parsed) {
+  const hints = [];
+  let score = 100;
+  const t = String(text || "");
+  const cjk = (t.match(/[\u4e00-\u9fa5]/g) || []).length;
+  if (cjk < 20) {
+    score -= 40;
+    hints.push("认出来的汉字太少，截图可能太糊或字太小");
+  }
+  if (!parsed) return { ok: false, score: 0, hints: ["没有解析出内容"] };
+
+  const ing = parsed.ingredients || [];
+  const steps = parsed.steps || [];
+  if (!ing.length) {
+    score -= 25;
+    hints.push("没认出食材");
+  }
+  if (!steps.length) {
+    score -= 30;
+    hints.push("没认出做法步骤");
+  }
+  // 食材名里混进句子
+  const dirty = ing.filter((i) => /炒|煮|放入|加入|盛出|捞出|翻炒|备用|锅热|小火|大火/.test(i.name));
+  if (dirty.length) {
+    score -= 25;
+    hints.push(`有 ${dirty.length} 条食材其实是做法句子`);
+  }
+  // 单字食材过多（"菠""六""酷" 这类乱码）
+  const short = ing.filter((i) => String(i.name).length === 1);
+  if (short.length >= 2) {
+    score -= 20;
+    hints.push(`有 ${short.length} 个单字食材，可能是识别错误`);
+  }
+  if (!parsed.title) {
+    score -= 10;
+    hints.push("没认出菜名");
+  }
+  return { ok: score >= 60, score: Math.max(0, score), hints };
 }
 
 /**
