@@ -423,6 +423,17 @@ function boot() {
     toast("本机存储快满了，建议先导出备份", "err");
   });
 
+  // 安卓 Chrome 的「安装到桌面」能力：捕获后由「我的」页面调用
+  window.addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault();
+    window.__fanlaiInstallPrompt = e;
+    window.dispatchEvent(new Event("fanlai:installable"));
+  });
+  window.addEventListener("appinstalled", () => {
+    window.__fanlaiInstallPrompt = null;
+    toast("装好了，下次从桌面图标进", "ok");
+  });
+
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", async () => {
       try {

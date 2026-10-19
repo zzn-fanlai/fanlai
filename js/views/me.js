@@ -16,7 +16,94 @@ import {
 import { downloadBlob } from "../lib/exportImage.js";
 import { statsFor } from "../lib/model.js";
 
-const APP_VERSION = "1.3.0";
+const APP_VERSION = "1.3.1";
+
+/* ============================================================
+   我的（首页）
+   ============================================================ */
+/* ============================================================
+   安装到桌面：按环境给出最靠谱的那一条路
+   ============================================================ */
+function envInfo() {
+  const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
+  const isIOS =
+    /iPad|iPhone|iPod/.test(ua) ||
+    (typeof navigator !== "undefined" && navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const isAndroid = /Android/i.test(ua);
+  const inWeChat = /MicroMessenger/i.test(ua);
+  const inQQ = /QQ\/|QQBrowser/i.test(ua);
+  const inWeibo = /Weibo/i.test(ua);
+  let standalone = false;
+  try {
+    standalone =
+      (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) ||
+      navigator.standalone === true;
+  } catch (_) {
+    standalone = false;
+  }
+  const installable = !!window.__fanlaiInstallPrompt;
+  return { isIOS, isAndroid, inWeChat, inQQ, inWeibo, standalone, installable, inApp: inWeChat || inQQ || inWeibo };
+}
+
+function installCard() {
+  const e = envInfo();
+
+  if (e.standalone) {
+    return `<div class="card flat mt-16">
+      <div class="small muted">✅ 现在就是从桌面图标打开的，已经装好了。</div>
+    </div>`;
+  }
+
+  if (e.inApp) {
+    const which = e.inWeChat ? "微信" : e.inQQ ? "QQ" : "微博";
+    return `<div class="card mt-16">
+      <div class="card-title">📲 装到桌面</div>
+      ${notice(
+        `你现在在 <b>${which}内置浏览器</b>里，它不支持安装。<br>点右上角 <b>···</b> → <b>在浏览器中打开</b>，再到浏览器里装。`,
+        "warn"
+      )}
+    </div>`;
+  }
+
+  if (e.installable) {
+    return `<div class="card mt-16">
+      <div class="card-title">📲 装到桌面</div>
+      <div class="small muted">装好之后从桌面点开，全屏无地址栏，还能离线用。</div>
+      <button class="btn btn-primary btn-block mt-10" data-act="do-install">立即安装到桌面</button>
+    </div>`;
+  }
+
+  if (e.isIOS) {
+    return `<div class="card mt-16">
+      <div class="card-title">📲 装到桌面（iPhone）</div>
+      <ol class="small" style="line-height:1.9;padding-left:18px">
+        <li>确认是用 <b>Safari</b> 打开的（不是微信、不是 Chrome）</li>
+        <li>底部点 <b>分享</b> 图标</li>
+        <li>选择 <b>添加到主屏幕</b></li>
+      </ol>
+      <div class="hint">iOS 不支持"自动安装"，只能手动加一次。</div>
+    </div>`;
+  }
+
+  if (e.isAndroid) {
+    return `<div class="card mt-16">
+      <div class="card-title">📲 装到桌面（安卓）</div>
+      <ol class="small" style="line-height:1.9;padding-left:18px">
+        <li>用 <b>Chrome</b> 或系统自带浏览器打开（不要用微信）</li>
+        <li>点右上角 <b>⋮</b> → 找 <b>安装应用</b></li>
+        <li>没有这一项就点 <b>添加到主屏幕</b></li>
+      </ol>
+      ${notice(
+        "如果完全没有「安装应用」：很多国行安卓没有 Google 服务，Chrome 生成不了真正的 PWA 图标 —— 这时用「添加到主屏幕」也能用，只是个普通快捷方式。",
+        ""
+      )}
+    </div>`;
+  }
+
+  return `<div class="card flat mt-16">
+    <div class="small muted">把饭来装到桌面：iPhone 用 Safari → 分享 → 添加到主屏幕；安卓用 Chrome → ⋮ → 安装应用。</div>
+  </div>`;
+}
 
 /* ============================================================
    我的（首页）
@@ -85,14 +172,29 @@ export function home() {
         </a>
       </div>
 
-      <div class="card flat mt-16">
-        <div class="small muted" style="line-height:1.8">
-          把饭来装到桌面：iPhone 用 Safari 打开 → 分享 → 添加到主屏幕；安卓用 Chrome → 菜单 → 安装应用。
-        </div>
-      </div>
+      ${installCard()}
 
       <div class="center tiny muted mt-16">饭来 ${APP_VERSION} · 数据在你自己的 Supabase 里</div>
     `,
+    actions: {
+      async "do-install"() {
+        const prompt = window.__fanlaiInstallPrompt;
+        if (!prompt) {
+          toast("这个浏览器不支持自动安装，看下面的手动步骤", "err");
+          return;
+        }
+        try {
+          prompt.prompt();
+          const choice = await prompt.userChoice;
+          if (choice && choice.outcome === "accepted") toast("装好了", "ok");
+          else toast("已取消");
+          window.__fanlaiInstallPrompt = null;
+          rerender();
+        } catch (err) {
+          toast("安装失败：" + (err?.message || err), "err");
+        }
+      },
+    },
   };
 }
 
