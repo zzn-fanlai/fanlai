@@ -561,7 +561,8 @@ export function importPage(ctx) {
         importState.raw = raw;
         const parsed = parseRecipe(raw);
         importState.parsed = parsed;
-        importState.quality = assessOcrQuality(text, parsed);
+        // 粘贴的文本一般比较干净，只做结构判断，不做 OCR 质量扣分
+        importState.quality = null;
         importState.step = "confirm";
         rerender();
       },
