@@ -57,6 +57,11 @@ const NOISE_LINE = [
   /^\d+(\.\d+)?\s*(万|w|W)?\s*(赞|点赞|收藏|评论|分享)$/,
   /^(编辑于|发布于|IP属地|同款|猜你喜欢|相关推荐|广告)/,
   /^(@|＠)\S{1,20}\s*$/,
+  // 纯话题标签行 / 日期地点 / 评论提示 / 按钮占位
+  /^(\s*#[^\s#]+)+\s*$/,
+  /^\d{1,2}\s*月\s*\d{1,2}\s*日/,
+  /^共\s*\d+\s*条评论/,
+  /^(说点什么|不喜欢|回复|查看更多|写评论)/,
 ];
 
 function isNoise(line) {
@@ -92,6 +97,7 @@ function trimMarketing(s) {
 
 function stripDecor(s) {
   return String(s || "")
+    .replace(/^[0-9]+[\uFE0F\u20E3]+\s*/g, "")  // 2⃣️ 这类 keycap 编号
     .replace(/https?:\/\/\S+/gi, "")               // 链接
     .replace(/#\s*[^\s#，,。、]{1,20}/g, "")       // 话题标签（# 后可能有空格）
     .replace(/@[^\s@，,。、]{1,20}/g, "")          // @某人
@@ -119,12 +125,19 @@ function pickTitle(lines, platform) {
       return;
     }
     if (isNoise(s)) return;
+    // 截图顶部的状态栏/界面文字（"3:54"、"图 3" 之类）
+    if (/^\d{1,2}:\d{2}/.test(s)) return;
+    if (/^[\d\s:：%A-Za-z._\-|]+$/.test(s)) return;
+    // 至少要有一个以上汉字
+    if ((s.match(/[\u4e00-\u9fa5]/g) || []).length < 2) return;
     // 跳过小标题行
     if (/^(用料|食材|材料|配料|主料|辅料|原料|做法|步骤|制作|教程)/.test(s)) return;
     // 跳过步骤行：以 1~2 位编号开头（"2 荆条和小米辣在锅中煸炒出虎皮"）几乎总是步骤
     if (/^\s*\d{1,2}\s*[.、:：)）]?\s/.test(s)) return;
     // 以烹饪动词开头的短句也当步骤
     if (/^(炒|煮|煸|煎|炸|蒸|炖|烤|焖|拌|切|倒|加|放|撒|淋|热锅|起锅|锅中|碗中|下锅|捞出|装盘)/.test(s)) return;
+    // 含烹饪动作且较长 → 是步骤不是菜名（"香煎鸡排"这种 4 字菜名不受影响）
+    if (s.length > 8 && COOK_VERB.test(s)) return;
 
     s = trimMarketing(stripDecor(s));
     if (!s || s.length < 2) return;
@@ -279,7 +292,279 @@ function pickSteps(lines) {
   return steps.slice(0, 30);
 }
 
-/* ---------- 元信息 ---------- */
+/* ============================================================
+   兜底通道：按语义逐句分类（应对 OCR / 无小标题的整段文本）
+   ------------------------------------------------------------
+   截图识别经常把「用料」识别成别的字、也没有换行，
+   这时只靠小标题就会把整段做法塞进食材里。
+   这里改用"句子特征"判断：
+     · 带编号开头 / 含烹饪动词 / 句子够长  → 步骤
+     · 短、无动词、长得像"名称+数量"        → 食材
+   ============================================================ */
+
+/** 烹饪动作词：出现即大概率是步骤 */
+const COOK_VERB = new RegExp(
+  [
+    "炒", "煮", "煎", "炸", "蒸", "炖", "烤", "焖", "拌", "切", "剁", "倒", "淋", "撒",
+    "翻", "盛", "捞", "放入", "加入", "下锅", "起锅", "热锅", "锅中", "转小", "转中", "转大",
+    "小火", "中火", "大火", "泡发", "洗净", "焯", "腌制", "抓匀", "调匀", "拌匀", "装盘",
+    "备用", "按压", "煸", "剥", "拍破", "封上", "铺", "盖", "焖煮", "收汁", "出锅", "摆盘",
+  ].join("|")
+);
+
+/** 粗切：按行 + 按句号/分号 + 按行内编号 */
+export function smartSplit(text) {
+  const out = [];
+  const push = (s) => {
+    const t = String(s || "").trim();
+    if (t) out.push(t);
+  };
+  for (const rawLine of String(text || "").split(/\n+/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    if (line.length <= 26) {
+      push(line);
+      continue;
+    }
+    // 长行先按句末标点断
+    for (const sentence of line.split(/(?<=[。！？；!?;])/)) {
+      const s = sentence.trim();
+      if (!s) continue;
+      if (s.length <= 26) {
+        push(s);
+        continue;
+      }
+      // 再按行内编号断（"1.xxx 2.xxx"）
+      for (const part of s.split(/(?=\d{1,2}\s*[.、:：)）]\s*)/)) push(part);
+    }
+  }
+  return out;
+}
+
+function stripListMark(s) {
+  return String(s || "")
+    .replace(/^[\s·•\-—*]+/, "")
+    .replace(/^[0-9]+[\uFE0F\u20E3]+\s*/, "")
+    .replace(/^\d{1,2}\s*[.、:：)）]\s*/, "")
+    .replace(/^[①②③④⑤⑥⑦⑧⑨⑩]\s*/, "")
+    .trim();
+}
+
+export function looksLikeStep(s) {
+  const t = String(s || "").trim();
+  if (!t) return false;
+  if (/^\d{1,2}\s*[.、:：)）]/.test(t)) return true;
+  if (COOK_VERB.test(t)) return true;
+  if (t.replace(/\s/g, "").length >= 20) return true;
+  return false;
+}
+
+function looksLikeIngredient(s) {
+  const t = stripListMark(s);
+  if (!t) return false;
+  if (looksLikeStep(t)) return false;
+  return t.replace(/\s/g, "").length <= 14;
+}
+
+/**
+ * 语义分类：返回 { ingredients:[字符串], steps:[字符串] }
+ */
+export function classifySegments(text) {
+  const segs = smartSplit(text);
+  const ingredients = [];
+  const steps = [];
+  let mode = null; // "ing" | "step" | null
+
+  const takeIng = (s) => {
+    const t = stripListMark(s).replace(/^(用料|食材|材料|所需材料|所需食材|配料|主料|辅料|原料)[：:\s]*/, "");
+    if (!t) return false;
+    let pieces = t.split(/[、，,；;／/]+/);
+    // OCR 常把食材用空格隔开而不是顿号
+    if (pieces.length === 1 && t.replace(/\s/g, "").length > 12) {
+      pieces = t.split(/\s+/);
+    }
+    let added = 0;
+    for (const piece of pieces) {
+      const v = String(piece || "").trim();
+      if (!v || v.length > 14) continue;
+      if (looksLikeStep(v)) continue;
+      ingredients.push(v);
+      added++;
+    }
+    return added > 0;
+  };
+
+  for (const seg of segs) {
+    // 先丢掉界面噪声（状态栏时间、纯字母数字行、点赞数等）
+    if (isNoise(seg)) continue;
+    if (/^\d{1,2}:\d{2}/.test(seg)) continue;
+    if (/^[\d\s:：%A-Za-z._\-|/]+$/.test(seg)) continue;
+    // 分区标题（可能出现在行首也可能独立成行）
+    if (/^(用料|食材|材料|所需材料|所需食材|配料|主料|辅料|原料)[：:\s]?/.test(seg)) {
+      mode = "ing";
+      const rest = seg.replace(/^(用料|食材|材料|所需材料|所需食材|配料|主料|辅料|原料)[：:\s]*/, "");
+      if (rest) takeIng(rest);
+      continue;
+    }
+    if (/^(做法|步骤|制作方法|制作步骤|做法步骤|操作步骤|烹饪步骤|小贴士|注意事项|提示)[：:\s]?/.test(seg)) {
+      mode = "step";
+      const rest = seg.replace(/^(做法|步骤|制作方法|制作步骤|做法步骤|操作步骤|烹饪步骤|小贴士|注意事项|提示)[：:\s]*/, "");
+      if (rest && rest.length > 4) steps.push(rest);
+      continue;
+    }
+    if (mode === "ing") {
+      if (looksLikeStep(seg)) {
+        steps.push(stripListMark(seg));
+        mode = "step";
+      } else takeIng(seg);
+      continue;
+    }
+    if (mode === "step") {
+      const t = stripListMark(seg);
+      if (t) steps.push(t);
+      continue;
+    }
+    // 还没遇到分区：靠特征猜
+    if (looksLikeStep(seg)) steps.push(stripListMark(seg));
+    else if (looksLikeIngredient(seg)) takeIng(seg);
+  }
+
+  return {
+    ingredients: Array.from(new Set(ingredients.map((s) => s.trim()).filter(Boolean))).slice(0, 30),
+    steps: steps.map((s) => s.trim()).filter((s) => s.length >= 2).slice(0, 25),
+  };
+}
+
+/* ============================================================
+   分区状态机：按「食材 / 调料 / 步骤」逐行推进
+   ------------------------------------------------------------
+   真实笔记常见写法（截图 OCR 也是这个结构）：
+     超级下饭的烧椒排骨
+     食材：排骨、螺丝椒（小米辣可以不用）
+     调料：蒜、青红花椒、老姜…
+     1：排骨清水把血水冲洗干净…
+     2 制作烧椒：…
+   关键：步骤不一定有「做法」两个字，编号开头就算。
+   ============================================================ */
+
+const ING_SECTION_RE =
+  /^(食材|用料|材料|所需材料|所需食材|配料|主料|辅料|原料|调料|调味料|佐料|调味|腌料)[：:\s]/;
+const STEP_SECTION_RE =
+  /^(做法|步骤|制作方法|制作步骤|做法步骤|操作步骤|烹饪步骤|小贴士|注意事项|提示|教程)[：:\s]/;
+
+/** "1：" "2." "3、" "2 制作烧椒" 都算步骤开头 */
+function isStepStart(line) {
+  const s = String(line || "").trim();
+  if (/^[0-9]{1,2}\s*[:：、.）)]\s*\S/.test(s)) return true;
+  if (/^[0-9]{1,2}\s+\S/.test(s)) return true;
+  if (/^[①②③④⑤⑥⑦⑧⑨⑩]\s*\S/.test(s)) return true;
+  return false;
+}
+
+/** 去掉括号补充说明，并拆成多条食材 */
+function splitIngredientText(text) {
+  const cleaned = String(text || "")
+    .replace(/[（(][^）)]*[）)]/g, "") // （小米辣可以不用，我吃的辣）
+    .replace(/^[\s·•\-—*、，,]+/, "")
+    .trim();
+  if (!cleaned) return [];
+  let pieces = cleaned.split(/[、，,；;／/]+/);
+  if (pieces.length === 1 && cleaned.replace(/\s/g, "").length > 12) {
+    pieces = cleaned.split(/\s+/);
+  }
+  return pieces.map((p) => p.trim()).filter((p) => p && p.length <= 14 && !looksLikeStep(p));
+}
+
+function cleanStepText(text) {
+  return String(text || "")
+    .replace(/^\s*[0-9]{1,2}\s*[:：、.）)]\s*/, "")
+    .replace(/^\s*[0-9]{1,2}\s+/, "") // "2 制作烧椒：" 这种空格编号
+    .replace(/^\s*[①②③④⑤⑥⑦⑧⑨⑩]\s*/, "")
+    .replace(/^[\s·•\-—*]+/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** 结构化解析：返回 { title, ingredients:[字符串], steps:[字符串] } */
+export function parseSections(lines) {
+  const ingredients = [];
+  const steps = [];
+  const titleCandidates = [];
+  let mode = null;
+  let firstSectionAt = -1;
+
+  lines.forEach((raw, idx) => {
+    const line = String(raw || "").trim();
+    if (!line) return;
+    if (isNoise(line)) return;
+    if (/^\d{1,2}:\d{2}/.test(line)) return; // 状态栏时间
+    if (/^[\d\s:：%A-Za-z._\-|/]+$/.test(line)) return; // 纯字母数字行
+    if (/^\d+\s*(条评论)?$/.test(line)) return;
+
+    const ingM = line.match(ING_SECTION_RE);
+    if (ingM) {
+      if (firstSectionAt < 0) firstSectionAt = idx;
+      mode = "ing";
+      const rest = line.slice(ingM[0].length);
+      if (rest) ingredients.push(...splitIngredientText(rest));
+      return;
+    }
+    const stepM = line.match(STEP_SECTION_RE);
+    if (stepM) {
+      if (firstSectionAt < 0) firstSectionAt = idx;
+      mode = "step";
+      const rest = line.slice(stepM[0].length);
+      if (rest.length > 2) steps.push(cleanStepText(rest));
+      return;
+    }
+    if (isStepStart(line)) {
+      if (firstSectionAt < 0) firstSectionAt = idx;
+      mode = "step";
+      steps.push(cleanStepText(line));
+      return;
+    }
+
+    if (mode === "ing") {
+      // 食材段里冒出长句 + 烹饪动作 → 其实已经进到做法了
+      const compact = line.replace(/\s/g, "");
+      if (COOK_VERB.test(line) && compact.length > 12) {
+        mode = "step";
+        steps.push(cleanStepText(line));
+        return;
+      }
+      ingredients.push(...splitIngredientText(line));
+      return;
+    }
+    if (mode === "step") {
+      const t = cleanStepText(line);
+      if (t.length >= 2) steps.push(t);
+      return;
+    }
+    titleCandidates.push({ text: stripDecor(line), idx });
+  });
+
+  // 标题：优先取「第一个分区前 1~4 行」里最像菜名的一句
+  const near = titleCandidates.filter(
+    (c) => firstSectionAt < 0 || (c.idx >= firstSectionAt - 4 && c.idx < firstSectionAt)
+  );
+  const pool = near.length ? near : titleCandidates;
+  const scored = pool
+    .map((c) => {
+      let s = 0;
+      if (/菜|饭|面|汤|肉|鱼|虾|鸡|蛋|锅|饼|包|粥|煲|炒|蒸|烤|拌|煮|排骨|豆腐|丸子/.test(c.text)) s += 10;
+      if (c.text.length >= 3 && c.text.length <= 16) s += 6;
+      if (s > 0) s += Math.max(0, 6 - Math.abs(c.text.length - 8));
+      return { ...c, s };
+    })
+    .sort((a, b) => b.s - a.s);
+
+  return {
+    title: scored.length && scored[0].s >= 8 ? scored[0].text : "",
+    ingredients: Array.from(new Set(ingredients)),
+    steps,
+  };
+}
+
 function pickServings(text) {
   const m = String(text).match(/(\d{1,2})\s*(?:人份|个人|人吃|人食)/);
   if (m) return `${m[1]} 人份`;
@@ -323,9 +608,43 @@ export function parseRecipe(raw) {
   const platform = detectPlatform(text);
   const url = extractUrl(text);
 
-  const title = pickTitle(lines, platform);
-  const ingredients = pickIngredients(lines);
-  const steps = pickSteps(lines);
+  // ① 先走分区状态机：对「食材/调料/1：…」这种笔记结构最准
+  const sec = parseSections(lines);
+  const secIngs = sec.ingredients.map((l) => makeIngredient(l)).filter(Boolean);
+  const stepMinutes = (t) => {
+    const mm = t.match(/(\d{1,3})\s*(?:分钟|min)/i);
+    return mm ? Math.min(240, Number(mm[1])) : null;
+  };
+  const secSteps = sec.steps.map((t) => ({ text: t, minutes: stepMinutes(t) }));
+
+  // ② 老的分区标记法作为补充（分享文案里更常见）
+  let ingredients = secIngs.length ? secIngs : pickIngredients(lines);
+  let steps = secSteps.length ? secSteps : pickSteps(lines);
+  const title = sec.title || pickTitle(lines, platform);
+
+  // ---- 兜底：小标题缺失（OCR 常见）时按语义重新切分 ----
+  // 触发条件：没有步骤 / 步骤异常少 / 食材多到不合理 / 食材里混进了做法句子
+  const segs = smartSplit(text);
+  const substantial = segs.length >= 3 || text.length >= 60;
+  const dirtyIngredients = ingredients.some((i) => COOK_VERB.test(String(i.name || "")) && String(i.name).length > 5);
+  const degenerate =
+    substantial && (steps.length === 0 || steps.length <= 1 || ingredients.length > 18 || dirtyIngredients);
+
+  if (degenerate) {
+    const c = classifySegments(text);
+    if (c.steps.length > steps.length) {
+      steps = c.steps.map((t) => {
+        let minutes = null;
+        const mm = t.match(/(\d{1,3})\s*(?:分钟|min)/i);
+        if (mm) minutes = Math.min(240, Number(mm[1]));
+        return { text: t, minutes };
+      });
+    }
+    if (c.ingredients.length > ingredients.length) {
+      const rebuilt = c.ingredients.map((line) => makeIngredient(line)).filter(Boolean);
+      if (rebuilt.length > ingredients.length) ingredients = rebuilt;
+    }
+  }
 
   const joined = text;
   const cookMinutes = pickCookMinutes(joined);
