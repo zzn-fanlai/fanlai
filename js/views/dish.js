@@ -27,6 +27,7 @@ import { recognizeImage, assessOcrQuality } from "../lib/ocr.js";
 import { qtyText } from "../lib/ingredients.js";
 import { toast, notice, confirmAction, emptyState, chipRow, rerender } from "../ui/kit.js";
 import { dishRow, ingredientList, stepList, sectionTitle } from "../ui/parts.js";
+import { linkChip } from "../ui/link.js";
 
 /* ---------- 视图内部状态 ---------- */
 let listState = { q: "", cuisine: "" };
@@ -151,9 +152,13 @@ export function detail(ctx) {
         ${dish.note ? `<div class="req-note" style="margin-top:12px">${esc(dish.note)}</div>` : ""}
         ${
           dish.source_url
-            ? `<div class="mt-10 small"><a href="${attr(dish.source_url)}" target="_blank" rel="noopener noreferrer">查看原链接（${esc(
-                platformLabel(dish.source_platform)
-              )}）↗</a></div>`
+            ? `<div class="btn-row mt-10">${linkChip({
+                url: dish.source_url,
+                name: dish.title,
+                platform: dish.source_platform,
+                label: `打开原链接（${platformLabel(dish.source_platform)}）`,
+                cls: "btn-sm btn-soft",
+              })}</div>`
             : ""
         }
       </div>

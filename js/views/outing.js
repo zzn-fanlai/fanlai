@@ -26,6 +26,7 @@ import {
   heartRating,
 } from "../ui/kit.js";
 import { restaurantRow, inviteCard, sectionTitle } from "../ui/parts.js";
+import { linkChip } from "../ui/link.js";
 import { inviteText } from "../lib/exportText.js";
 import { cardCanvas, canvasToBlob } from "../lib/exportImage.js";
 
@@ -516,7 +517,18 @@ export function detail(ctx) {
                 }</div>`
               : ""
           }
-          <div>🔗 ${esc(platformLabel(r.platform))}${r.link ? ` · <a href="${attr(r.link)}" target="_blank" rel="noopener">打开原链接</a>` : ""}</div>
+          <div>🔗 ${esc(platformLabel(r.platform))}</div>
+          ${
+            r.link
+              ? `<div class="btn-row mt-10">${linkChip({
+                  url: r.link,
+                  name: r.name,
+                  platform: r.platform,
+                  label: "打开原链接",
+                  cls: "btn-sm btn-soft",
+                })}</div>`
+              : ""
+          }
           ${r.note ? `<div>📝 ${esc(r.note)}</div>` : ""}
         </div>
       </div>

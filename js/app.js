@@ -5,6 +5,7 @@ import { store, select } from "./store.js";
 import { sync } from "./sync.js";
 import { esc, attr, todayISO, fmtMD, isoWeekday, relativeDay } from "./lib/util.js";
 import { closeSheet, toast } from "./ui/kit.js";
+import { linkSheet } from "./ui/link.js";
 
 import * as onboard from "./views/onboard.js";
 import * as cook from "./views/cook.js";
@@ -335,6 +336,13 @@ document.addEventListener("click", (ev) => {
     ev.preventDefault();
     if (history.length > 1) history.back();
     else go("#/cook");
+    return;
+  }
+  // 链接跳转：唯一入口，任何页面都能用
+  if (act === "open-link") {
+    ev.preventDefault();
+    ev.stopPropagation();
+    linkSheet({ url: el.dataset.url, name: el.dataset.name, platform: el.dataset.platform });
     return;
   }
 

@@ -41,6 +41,7 @@ import {
   rerender,
 } from "../ui/kit.js";
 import { dishRow, requestCard, planLine, sectionTitle, ingredientList, stepList } from "../ui/parts.js";
+import { linkChip } from "../ui/link.js";
 import { askSlot } from "../ui/slot.js";
 
 /* ============================================================
@@ -252,6 +253,17 @@ export function planSheet(plan) {
         <a class="btn btn-primary" href="#/cook/step/${plan.id}">开始做饭 →</a>
         <button class="btn btn-sage" data-act="sheet-done">${plan.status === "done" ? "改回未做" : "标记已做"}</button>
       </div>
+      ${
+        d.source_url
+          ? `<div class="btn-row mb-10">${linkChip({
+              url: d.source_url,
+              name: d.title,
+              platform: d.source_platform,
+              label: "看原帖",
+              cls: "btn-sm btn-soft",
+            })}</div>`
+          : ""
+      }
       <div class="sheet-sub">食材</div>
       ${ingredientList(d.ingredients || [])}
       <div class="sheet-sub mt-16">做法</div>

@@ -22,6 +22,9 @@ export function dishSnapshot(dish) {
     servings: dish.servings || "",
     ingredients: dish.ingredients || [],
     steps: dish.steps || [],
+    // 带上来源链接，菜单/做饭页也能一键跳回原帖
+    source_url: dish.source_url || "",
+    source_platform: dish.source_platform || "",
   };
 }
 

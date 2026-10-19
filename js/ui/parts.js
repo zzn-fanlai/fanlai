@@ -14,6 +14,7 @@ import {
   ROLES,
 } from "../lib/catalog.js";
 import { badge, heartRating, notice } from "./kit.js";
+import { linkChip } from "./link.js";
 
 export function dishRow(dish, { act = "open-dish", right = '<span class="row-chev">›</span>' } = {}) {
   const meta = [];
@@ -21,7 +22,7 @@ export function dishRow(dish, { act = "open-dish", right = '<span class="row-che
   if (dish.servings) meta.push(dish.servings);
   if (dish.cuisine) meta.push(dish.cuisine);
   if (dish.ingredients?.length) meta.push(`${dish.ingredients.length} 样食材`);
-  return `<button class="row" data-act="${act}" data-id="${attr(dish.id)}">
+  return `<div class="row" data-act="${act}" data-id="${attr(dish.id)}" role="button" tabindex="0">
     <div class="row-emoji">${esc(dish.emoji || "🍳")}</div>
     <div class="row-main">
       <div class="row-title"><span class="t">${esc(dish.title || "未命名")}</span>${
@@ -29,8 +30,11 @@ export function dishRow(dish, { act = "open-dish", right = '<span class="row-che
   }</div>
       <div class="row-sub">${meta.map((m) => `<span>${esc(m)}</span>`).join("")}</div>
     </div>
-    <div class="row-aside">${right}</div>
-  </button>`;
+    <div class="row-aside">
+      ${linkChip({ url: dish.source_url, name: dish.title, platform: dish.source_platform, label: "原链接" })}
+      ${right}
+    </div>
+  </div>`;
 }
 
 export function restaurantRow(r, { act = "open-rest", right = '<span class="row-chev">›</span>' } = {}) {
@@ -40,7 +44,9 @@ export function restaurantRow(r, { act = "open-rest", right = '<span class="row-
   if (r.kind === "takeout" && r.delivery_fee) meta.push(`配送 ¥${r.delivery_fee}`);
   if (r.kind === "dine" && r.address) meta.push(r.address);
   if (r.kind === "takeout" && r.address) meta.push(r.address);
-  return `<button class="row" data-act="${act}" data-id="${attr(r.id)}" data-cuisine="${attr(r.cuisine || "")}">
+  return `<div class="row" data-act="${act}" data-id="${attr(r.id)}" data-cuisine="${attr(
+    r.cuisine || ""
+  )}" role="button" tabindex="0">
     <div class="row-emoji">${r.kind === "takeout" ? "🛵" : "🍽️"}</div>
     <div class="row-main">
       <div class="row-title"><span class="t">${esc(r.name || "未命名")}</span></div>
@@ -48,8 +54,11 @@ export function restaurantRow(r, { act = "open-rest", right = '<span class="row-
         ${r.craving ? `<span style="color:var(--tomato)">${heartRating(r.craving)}</span>` : ""}
       </div>
     </div>
-    <div class="row-aside">${right}</div>
-  </button>`;
+    <div class="row-aside">
+      ${linkChip({ url: r.link, name: r.name, platform: r.platform, label: "原链接" })}
+      ${right}
+    </div>
+  </div>`;
 }
 
 export function ingredientList(ings = []) {
@@ -145,6 +154,17 @@ export function inviteCard(inv, { kind, myRole = "chef", showActions = true } = 
       ${r.avg_price ? `<span>人均 ¥${esc(r.avg_price)}</span>` : ""}
     </div>
     ${inv.note ? `<div class="req-note">${esc(inv.note)}</div>` : ""}
+    ${
+      r.link
+        ? `<div class="req-acts">${linkChip({
+            url: r.link,
+            name: r.name,
+            platform: r.platform,
+            label: "看店铺链接",
+            cls: "btn-sm btn-soft",
+          })}</div>`
+        : ""
+    }
     ${
       showActions && inv.status === "pending"
         ? `<div class="req-acts">
