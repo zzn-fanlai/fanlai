@@ -482,6 +482,7 @@ function isPlausibleIngredientName(name) {
 function splitIngredientText(text) {
   const cleaned = String(text || "")
     .replace(/[（(][^）)]*[）)]/g, "") // （小米辣可以不用，我吃的辣）
+    .replace(/[〈〈<【「[][\s\S]*$/, "") // OCR 常见的未闭合左括号：后面全是补充说明
     .replace(/^[\s·•\-—*、，,]+/, "")
     .trim();
   if (!cleaned) return [];
@@ -502,6 +503,10 @@ function cleanStepText(text) {
     .replace(/^\s*[0-9]{1,2}\s*[:：、.）)]\s*/, "")
     .replace(/^\s*[0-9]{1,2}\s+/, "") // "2 制作烧椒：" 这种空格编号
     .replace(/^\s*[①②③④⑤⑥⑦⑧⑨⑩]\s*/, "")
+    // OCR 把编号认成乱码字："吕:" "司|" "品"
+    .replace(/^[\u4e00-\u9fa5]{1,3}\s*[：:|｜]\s*/, "")
+    // "品制作烧椒:…" —— 第一个字是乱码，后面的"制作烧椒"是有效小标题
+    .replace(/^[\u4e00-\u9fa5]\s*(?=[\u4e00-\u9fa5]{2,6}\s*[：:])/, "")
     .replace(/^[\s·•\-—*]+/, "")
     .replace(/\s+/g, " ")
     .trim();
@@ -632,7 +637,10 @@ export function parseRecipe(raw) {
 
   // ① 先走分区状态机：对「食材/调料/1：…」这种笔记结构最准
   const sec = parseSections(lines);
-  const secIngs = sec.ingredients.map((l) => makeIngredient(l)).filter(Boolean);
+  const secIngs = sec.ingredients
+    .map((l) => makeIngredient(l))
+    .filter(Boolean)
+    .filter((i) => isPlausibleIngredientName(i.name));
   const stepMinutes = (t) => {
     const mm = t.match(/(\d{1,3})\s*(?:分钟|min)/i);
     return mm ? Math.min(240, Number(mm[1])) : null;
@@ -663,7 +671,10 @@ export function parseRecipe(raw) {
       });
     }
     if (c.ingredients.length > ingredients.length) {
-      const rebuilt = c.ingredients.map((line) => makeIngredient(line)).filter(Boolean);
+      const rebuilt = c.ingredients
+        .filter((line) => isPlausibleIngredientName(line))
+        .map((line) => makeIngredient(line))
+        .filter(Boolean);
       if (rebuilt.length > ingredients.length) ingredients = rebuilt;
     }
   }

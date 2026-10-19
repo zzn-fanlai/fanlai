@@ -16,7 +16,7 @@ import {
 import { downloadBlob } from "../lib/exportImage.js";
 import { statsFor } from "../lib/model.js";
 
-const APP_VERSION = "1.1.0";
+const APP_VERSION = "1.1.1";
 
 /* ============================================================
    我的（首页）

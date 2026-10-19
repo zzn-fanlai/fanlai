@@ -78,6 +78,10 @@ export function cleanOcrText(raw) {
       if (/^(小红书|抖音|关注|点赞|收藏|分享|评论|展开|全文|广告)/.test(l) && l.length <= 12) return false;
       // 纯符号/表情行
       if (!/[\u4e00-\u9fa5A-Za-z0-9]/.test(l)) return false;
+      // 输入框占位、评论区
+      if (/说点什么|写评论|条评论/.test(l)) return false;
+      // 中英混杂的界面文字（作者签名、"Niceto eat U" 之类）
+      if (/[A-Za-z]{4,}/.test(l) && /[\u4e00-\u9fa5]/.test(l)) return false;
       return true;
     })
     .join("\n");
@@ -86,7 +90,64 @@ export function cleanOcrText(raw) {
   return t.trim();
 }
 
-/** 判断识别质量：返回 { ok, score, hints[] } —— 太差就别急着存 */
+/**
+ * 版面还原：把 Tesseract 的输出收拾成"每行一个语义块"
+ * ------------------------------------------------------------
+ * 真实截图 OCR 有三个顽疾：
+ *   1. 每个汉字之间插空格（"超 级 下 饭 的"）
+ *   2. 一行被截断，后半行跑到下一行（"鸡" + "精、是 油"）
+ *   3. 步骤编号被认成一两个乱码字（"吕:" "品" "司|"）
+ * 这里：去逐字空格 → 按"新块标记"判断哪些行是续行并拼接
+ */
+export function reflowOcrText(raw) {
+  let t = String(raw || "");
+
+  // 1) 去掉汉字之间的空格（保留换行！不能用 \s）
+  t = t.replace(/([\u4e00-\u9fa5])[ \t]*(?=[\u4e00-\u9fa5])/g, "$1");
+  // 2) 去掉标点/分隔符两侧空格
+  t = t.replace(/[ \t]*([，。；：！？、,.!?;:|｜])[ \t]*/g, "$1");
+
+  const lines = t
+    .split("\n")
+    .map((s) => s.trim())
+    .filter((s) => {
+      if (!s) return false;
+      // 这些行整条丢弃：话题标签、日期地点、评论数、占位文案
+      if (/^(#\s*[^\s#]+\s*)+$/.test(s.replace(/[ \t]/g, ""))) return false;
+      if (/^\d{1,2}\s*月\s*\d{1,2}\s*日/.test(s)) return false;
+      if (/^共\s*\d+\s*条评论/.test(s)) return false;
+      if (/说点什么|写评论|条评论/.test(s)) return false;
+      if (/^[\d\s%+.,:：()）)…·]+$/.test(s)) return false;
+      return true;
+    });
+
+  /** 这一行是否开启一个新语义块 */
+  const isNewBlock = (s) =>
+    /^(食材|调料|用料|配料|主料|辅料|原料|腌料|调味料|调味|佐料)/.test(s) ||
+    /^(做法|步骤|制作方法|制作步骤|小贴士|注意事项|提示)/.test(s) ||
+    /^[\u4e00-\u9fa5]{1,3}\s*[：:|｜]/.test(s) || // "吕:" "司 |"
+    /^[\u4e00-\u9fa5]{1,6}\s*[：:]\s*.{4,}/.test(s); // "品制作烧椒:…"
+
+  const out = [];
+  let insideBlock = false;
+  for (const line of lines) {
+    if (isNewBlock(line)) {
+      out.push(line);
+      insideBlock = true;
+      continue;
+    }
+    // 还没进入任何分区（标题 / 引子）：每行独立
+    if (!insideBlock || !out.length) {
+      out.push(line);
+      continue;
+    }
+    // 分区内的续行：拼到上一行
+    const prev = out[out.length - 1];
+    const needSpace = /[A-Za-z0-9]$/.test(prev) && /^[A-Za-z0-9]/.test(line);
+    out[out.length - 1] = prev + (needSpace ? " " : "") + line;
+  }
+  return out.join("\n");
+}
 export function assessOcrQuality(text, parsed) {
   const hints = [];
   let score = 100;
@@ -152,7 +213,7 @@ export async function recognizeImage(file, { onProgress, onStage } = {}) {
       onStage && onStage("正在识别…");
       const { data } = await worker.recognize(file);
       await worker.terminate();
-      return cleanOcrText(data.text || "");
+      return reflowOcrText(cleanOcrText(data.text || ""));
     } catch (err) {
       lastErr = err;
       try {
