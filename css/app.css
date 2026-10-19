@@ -235,6 +235,7 @@ img { max-width: 100%; }
   box-shadow: var(--shadow-sticker);
   transition: transform var(--t-fast) var(--ease), background var(--t-fast) var(--ease), opacity var(--t-fast);
   user-select: none;
+  touch-action: manipulation;
 }
 .btn:active { transform: translateY(1px) scale(.99); }
 .btn[disabled] { opacity: .45; pointer-events: none; }

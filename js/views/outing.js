@@ -133,19 +133,17 @@ export function home({ kind }) {
       },
       async "decline-invite"(el) {
         const inv = store.get("invites", el.dataset.id);
-        const reason = await askText({
-          title: "不去了，说一句？",
-          optional: true,
-          placeholder: "今天太累了，改天吧",
-          label: "理由（可留空）",
-        });
-        decideInvite(inv, false, reason || "");
-        toast("已回绝");
+        if (!inv) return;
+        // 直接回绝（不再弹窗问理由，减少弹层依赖）
+        decideInvite(inv, false, "");
+        toast("已回绝，TA 会看到");
       },
       "cancel-invite"(el) {
         const inv = store.get("invites", el.dataset.id);
+        if (!inv) return;
+        // pending / agreed 都能取消
         cancelInvite(inv);
-        toast("已取消");
+        toast(inv.status === "agreed" ? "已取消这次饭局" : "已取消", "ok");
       },
       "edit-invite"(el) {
         const inv = store.get("invites", el.dataset.id);

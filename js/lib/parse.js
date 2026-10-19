@@ -52,6 +52,11 @@ const NOISE_LINE = [
   /^(发布了|笔记|视频|图文|分享自|来自|via|by)\b/i,
   /^[\s\-—–_=*·.,;:!?~]+$/,
   /^(展开|收起|更多|全文|查看全文)/,
+  // 截图/笔记里常见的界面噪声
+  /^(展开|收起)?\s*\d+\s*条评论/,
+  /^\d+(\.\d+)?\s*(万|w|W)?\s*(赞|点赞|收藏|评论|分享)$/,
+  /^(编辑于|发布于|IP属地|同款|猜你喜欢|相关推荐|广告)/,
+  /^(@|＠)\S{1,20}\s*$/,
 ];
 
 function isNoise(line) {
@@ -116,6 +121,10 @@ function pickTitle(lines, platform) {
     if (isNoise(s)) return;
     // 跳过小标题行
     if (/^(用料|食材|材料|配料|主料|辅料|原料|做法|步骤|制作|教程)/.test(s)) return;
+    // 跳过步骤行：以 1~2 位编号开头（"2 荆条和小米辣在锅中煸炒出虎皮"）几乎总是步骤
+    if (/^\s*\d{1,2}\s*[.、:：)）]?\s/.test(s)) return;
+    // 以烹饪动词开头的短句也当步骤
+    if (/^(炒|煮|煸|煎|炸|蒸|炖|烤|焖|拌|切|倒|加|放|撒|淋|热锅|起锅|锅中|碗中|下锅|捞出|装盘)/.test(s)) return;
 
     s = trimMarketing(stripDecor(s));
     if (!s || s.length < 2) return;
@@ -213,7 +222,7 @@ function pickIngredients(lines) {
 
 /* ---------- 步骤 ---------- */
 function pickSteps(lines) {
-  const startRe = /^(做法|步骤|制作方法|制作步骤|做法步骤|操作步骤|烹饪步骤|教程|怎么做|开始做)[：:\s]?/;
+  const startRe = /^(做法|步骤|制作方法|制作步骤|做法步骤|操作步骤|烹饪步骤|教程|怎么做|开始做|小贴士|注意事项|提示)[：:\s]?/;
   let start = -1;
   for (let i = 0; i < lines.length; i++) {
     if (startRe.test(lines[i])) {

@@ -409,7 +409,15 @@ export function pick(ctx) {
 
       ${
         st.selected.size
-          ? `<div class="selbar" id="selbar">
+          ? `<div class="card tight" style="margin-top:10px" id="note-card">
+              <label class="tiny muted" style="display:block;margin-bottom:6px">${
+                isSwap ? "换菜说明（可留空）" : st.mode === "plan" ? "备注（可留空）" : "口味 / 要求（可留空）"
+              }</label>
+              <input class="input" id="pick-note" maxlength="120" placeholder="${
+                isSwap ? "今天没买到鱼，换成鸡翅啦" : "少放辣、多放点蒜…"
+              }" value="${attr(st.note || "")}" />
+            </div>
+            <div class="selbar" id="selbar">
               <div class="selbar-info">已选 <b>${st.selected.size}</b> 道</div>
               <button class="btn btn-ghost btn-sm" data-act="clear-sel">清空</button>
               <button class="btn btn-primary btn-sm" data-act="submit-pick">${
@@ -445,6 +453,10 @@ export function pick(ctx) {
         const ids = Array.from(st.selected);
         if (!ids.length) return;
 
+        // 备注直接读页面上的输入框（不再弹窗，避免 iOS 上 fixed 弹层点不动）
+        const noteEl = document.getElementById("pick-note");
+        const note = (noteEl ? noteEl.value : "").trim();
+
         if (isSwap) {
           const target = select.dish(ids[0]);
           const req = store.get("requests", st.requestId);
@@ -452,15 +464,7 @@ export function pick(ctx) {
             toast("出错了，回去重试", "err");
             return;
           }
-          const note = await askText({
-            title: "跟 TA 说一句",
-            desc: "换成这道菜，附带一句说明。",
-            label: "说明（可留空）",
-            placeholder: "今天没有鱼，换成鸡翅啦",
-            optional: true,
-            ok: "换这道",
-          });
-          swapRequest(req, target, { date: st.date, meal: st.meal, note: note || "" });
+          swapRequest(req, target, { date: st.date, meal: st.meal, note });
           toast("已换菜", "ok");
           location.hash = "#/cook";
           return;
@@ -480,20 +484,11 @@ export function pick(ctx) {
           return;
         }
 
-        const note = await askText({
-          title: "跟大厨说一句",
-          desc: `把 ${ids.length} 道菜放进${relativeDay(st.date)}的${mealLabel(st.meal)}。`,
-          label: "口味 / 要求（可留空）",
-          placeholder: "少放辣、多放点蒜…",
-          optional: true,
-          maxlength: 200,
-          ok: "就这么点",
-        });
         let n = 0;
         for (const id of ids) {
           const dish = select.dish(id);
           if (dish) {
-            createRequest({ dish, date: st.date, meal: st.meal, note: note || "" });
+            createRequest({ dish, date: st.date, meal: st.meal, note });
             n++;
           }
         }
@@ -502,6 +497,11 @@ export function pick(ctx) {
       },
     },
     afterRender(root) {
+      // 备注随输入保存，避免勾选其他菜时被重渲染清空
+      const noteInput = root.querySelector("#pick-note");
+      if (noteInput) {
+        noteInput.addEventListener("input", () => (st.note = noteInput.value));
+      }
       const input = root.querySelector("#pick-search");
       if (input) {
         input.addEventListener("input", () => {

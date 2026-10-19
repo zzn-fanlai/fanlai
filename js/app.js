@@ -253,6 +253,9 @@ function render() {
   currentView = view;
   currentRoute = path;
 
+  // 进入某个 Tab 根页面 = 已读，清掉红点（静默写入，避免触发重渲染循环）
+  markRouteSeen(path);
+
   const prevY = scrollMemo.get(path) || 0;
   renderShell(view, path);
   paintSyncDot();
@@ -273,6 +276,16 @@ const onWindowScroll = () => {
   const bar = document.getElementById("topbar");
   if (bar) bar.classList.toggle("scrolled", window.scrollY > 4);
 };
+
+/** 进入 Tab 根页面就把对应红点标记为已读 */
+function markRouteSeen(path) {
+  try {
+    if (path === "/cook") store.markSeen("requests", Date.now(), { silent: true });
+    if (path === "/dine" || path === "/takeout") store.markSeen("invites", Date.now(), { silent: true });
+  } catch (_) {
+    /* 忽略 */
+  }
+}
 
 function bindViewEvents() {
   const viewEl = document.getElementById("view");
@@ -403,10 +416,36 @@ function boot() {
   });
 
   if ("serviceWorker" in navigator) {
-    window.addEventListener("load", () => {
-      navigator.serviceWorker.register("./sw.js").catch((err) => {
+    window.addEventListener("load", async () => {
+      try {
+        // updateViaCache: "none" —— 关键：让 sw.js 每次都绕过 HTTP 缓存去拿网络版，
+        // 否则 GitHub Pages 的 10 分钟缓存会让新版本永远装不上
+        const reg = await navigator.serviceWorker.register("./sw.js", { updateViaCache: "none" });
+
+        // 有新版本装好了 → 自动刷新一次（用会话标记防死循环）
+        reg.addEventListener("updatefound", () => {
+          const sw = reg.installing;
+          if (!sw) return;
+          sw.addEventListener("statechange", () => {
+            if (sw.state !== "installed") return;
+            if (!navigator.serviceWorker.controller) return; // 首次安装不刷新
+            const tried = Number(sessionStorage.getItem("fanlai.reloads") || "0");
+            if (tried >= 2) return;
+            sessionStorage.setItem("fanlai.reloads", String(tried + 1));
+            toast("发现新版本，正在更新…", "ok");
+            setTimeout(() => window.location.reload(), 700);
+          });
+        });
+
+        // 回到前台时检查一次更新
+        document.addEventListener("visibilitychange", () => {
+          if (document.visibilityState === "visible") reg.update().catch(() => {});
+        });
+        // 每小时也检查一次
+        setInterval(() => reg.update().catch(() => {}), 60 * 60 * 1000);
+      } catch (err) {
         console.warn("[饭来] Service Worker 注册失败", err);
-      });
+      }
     });
   }
 

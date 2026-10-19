@@ -163,6 +163,7 @@ export function inviteCard(inv, { kind, myRole = "chef", showActions = true } = 
         ? `<div class="req-acts">
              <button class="btn btn-sm btn-soft" data-act="card-invite" data-id="${attr(inv.id)}">饭局卡片</button>
              <button class="btn btn-sm btn-ghost" data-act="edit-invite" data-id="${attr(inv.id)}">改金额/请客</button>
+             <button class="btn btn-sm btn-danger" data-act="cancel-invite" data-id="${attr(inv.id)}">取消这次</button>
            </div>`
         : ""
     }

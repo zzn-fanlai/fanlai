@@ -62,19 +62,46 @@ function openDialog(html, { onMount, dismissible = true } = {}) {
     </div>`;
   document.body.appendChild(layer);
 
-  const close = (result) => {
+  let settled = false;
+  const finish = (value) => {
+    if (settled) return;
+    settled = true;
     layer.remove();
     if (!document.querySelector(".sheet:not([hidden])")) document.body.style.overflow = "";
-    layer._resolve && layer._resolve(result);
+    try {
+      if (typeof layer._settle === "function") layer._settle(value);
+    } catch (err) {
+      console.error("[饭来] 弹窗收尾异常", err);
+    }
   };
-  layer._close = close;
+  layer._close = () => finish(undefined);
+  layer._finish = finish;
 
   if (dismissible) {
-    layer.querySelector(".sheet-mask").addEventListener("click", () => close());
+    layer.querySelector(".sheet-mask").addEventListener("click", () => finish(undefined));
   }
   document.body.style.overflow = "hidden";
-  if (onMount) onMount(layer.querySelector(".sheet-body"), close);
-  return { el: layer, close };
+
+  // 注意：onMount 在 openDialog 返回之前就执行了，
+  // 所以只能用这里传入的 finish / layer，不能引用外层解构出来的变量（会造成 TDZ 报错，按钮全死）
+  if (onMount) onMount(layer.querySelector(".sheet-body"), finish, layer);
+
+  // 整层点击委托：按钮晚出现、或监听没挂上也能生效
+  layer.addEventListener("click", (ev) => {
+    const btn = ev.target.closest("[data-r]");
+    if (btn && !btn.disabled) {
+      ev.preventDefault();
+      if (typeof layer._onResult === "function") layer._onResult(btn.dataset.r, btn);
+      return;
+    }
+    const row = ev.target.closest("[data-i]");
+    if (row && typeof layer._onIndex === "function") {
+      ev.preventDefault();
+      layer._onIndex(Number(row.dataset.i));
+    }
+  });
+
+  return { el: layer, close: () => finish(undefined), finish };
 }
 
 /* ---------- 确认框 ---------- */
@@ -94,15 +121,9 @@ export function confirmAction({
          <button class="btn ${danger ? "btn-primary" : "btn-primary"}" data-r="1">${esc(ok)}</button>
        </div>`,
       {
-        onMount(body) {
-          body.querySelectorAll("[data-r]").forEach((btn) => {
-            btn.addEventListener("click", () => {
-              const v = btn.dataset.r === "1";
-              close();
-              resolve(v);
-            });
-          });
-          el._resolve = () => resolve(false);
+        onMount(body, finish, layer) {
+          layer._settle = (v) => resolve(v === true);
+          layer._onResult = (r) => finish(r === "1");
         },
       }
     );
@@ -135,34 +156,34 @@ export function askText({
          <button class="btn btn-primary" data-r="1">${esc(ok)}</button>
        </div>`,
       {
-        onMount(body) {
+        onMount(body, finish, layer) {
+          layer._settle = (v) => resolve(v === undefined ? null : v);
           const field = body.querySelector("#ask-input");
-          setTimeout(() => field.focus(), 60);
+          if (!field) {
+            finish(undefined);
+            return;
+          }
           const submit = () => {
             const v = field.value.trim();
             if (!v && !optional) {
               toast("写点什么吧");
               return;
             }
-            close();
-            resolve(v);
+            finish(v);
           };
-          body.querySelectorAll("[data-r]").forEach((btn) => {
-            btn.addEventListener("click", () => {
-              if (btn.dataset.r === "1") submit();
-              else {
-                close();
-                resolve(null);
-              }
-            });
-          });
+          layer._onResult = (r) => {
+            if (r === "1") submit();
+            else finish(undefined);
+          };
+          // 触屏设备不自动聚焦，避免键盘把 fixed 弹层顶上去
+          const isTouch = typeof matchMedia === "function" && matchMedia("(hover: none)").matches;
+          if (!isTouch) setTimeout(() => field.focus(), 60);
           field.addEventListener("keydown", (ev) => {
             if (ev.key === "Enter" && !multiline) {
               ev.preventDefault();
               submit();
             }
           });
-          el._resolve = () => resolve(null);
         },
       }
     );
@@ -191,19 +212,10 @@ export function chooseOne({ title, desc = "", options = [], value = "" }) {
        <div class="list">${rows}</div>
        <button class="btn btn-ghost btn-block mt-10" data-r="0">取消</button>`,
       {
-        onMount(body) {
-          body.querySelectorAll("[data-i]").forEach((btn) => {
-            btn.addEventListener("click", () => {
-              const o = options[Number(btn.dataset.i)];
-              close();
-              resolve(o.value);
-            });
-          });
-          body.querySelector('[data-r="0"]').addEventListener("click", () => {
-            close();
-            resolve(null);
-          });
-          el._resolve = () => resolve(null);
+        onMount(body, finish, layer) {
+          layer._settle = (v) => resolve(v === undefined ? null : v);
+          layer._onIndex = (i) => finish(options[i] ? options[i].value : null);
+          layer._onResult = () => finish(undefined);
         },
       }
     );

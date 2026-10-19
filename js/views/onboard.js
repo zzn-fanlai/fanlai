@@ -50,12 +50,15 @@ export function render() {
       const codeInput = root.querySelector("#code-input");
       if (codeInput) {
         codeInput.value = draft.code;
-        codeInput.addEventListener("input", () => {
+        const sync = () => {
           draft.code = codeInput.value.replace(/\D/g, "").slice(0, 6);
-          codeInput.value = draft.code;
-          const btn = root.querySelector('[data-act="submit-join"]');
-          if (btn) btn.disabled = draft.code.length !== 6;
-        });
+          if (codeInput.value !== draft.code) codeInput.value = draft.code;
+        };
+        // 不用 disabled 控制按钮（重渲染或 iOS 自动填充会导致按钮永远灰着），
+        // 改为提交时校验，这里只做输入清洗
+        codeInput.addEventListener("input", sync);
+        codeInput.addEventListener("change", sync);
+        codeInput.addEventListener("blur", sync);
       }
     },
   };
@@ -144,7 +147,7 @@ const TEMPLATES = {
       </div>
       ${nickField()}
       ${rolePicker()}
-      <button class="btn btn-primary btn-block mt-10" data-act="submit-join" disabled>加入</button>
+      <button class="btn btn-primary btn-block mt-10" data-act="submit-join" id="join-btn">加入</button>
       <button class="btn btn-ghost btn-block mt-6" data-act="back-welcome">返回</button>
     </div>`;
   },
@@ -239,6 +242,9 @@ const ACTIONS = {
 
   async "submit-create"() {
     if (draft.busy) return;
+    // 直接从输入框读，避免自动填充等场景下 draft 没同步
+    const nickEl = document.getElementById("nick-input");
+    if (nickEl) draft.nickname = nickEl.value;
     const nickname = (draft.nickname || "").trim();
     if (!nickname) {
       toast("先起个昵称吧");
@@ -259,8 +265,14 @@ const ACTIONS = {
 
   async "submit-join"() {
     if (draft.busy) return;
+    // 同理：以输入框的实际内容为准
+    const codeEl = document.getElementById("code-input");
+    if (codeEl) draft.code = codeEl.value.replace(/\D/g, "").slice(0, 6);
+    const nickEl = document.getElementById("nick-input");
+    if (nickEl) draft.nickname = nickEl.value;
+
     if (draft.code.length !== 6) {
-      toast("房间码是 6 位数字");
+      toast("房间码是 6 位数字，再核对一下");
       return;
     }
     const nickname = (draft.nickname || "").trim();

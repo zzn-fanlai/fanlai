@@ -1,4 +1,4 @@
-/* ============================================================
+﻿/* ============================================================
    饭来 · 我的：资料 / 同步设置 / 备份 / 关于
    ============================================================ */
 import { store, select } from "../store.js";
@@ -16,7 +16,7 @@ import {
 import { downloadBlob } from "../lib/exportImage.js";
 import { statsFor } from "../lib/model.js";
 
-const APP_VERSION = "1.0.1";
+const APP_VERSION = "1.0.6";
 
 /* ============================================================
    我的（首页）
@@ -481,12 +481,34 @@ export function about() {
       </div>
 
       <button class="btn btn-block" data-act="replay-onboard">重看引导</button>
+
+      <div class="divider"></div>
+      <button class="btn btn-soft btn-block" data-act="force-update">立即更新到最新版本</button>
+      <div class="hint center mt-6">升级后如果界面还是旧的，点这里（会清缓存并重新加载）</div>
     `,
     actions: {
       "replay-onboard"() {
         store.setLocal({ onboardSeen: false });
         toast("下次打开会看到引导（或点下面的按钮）");
         location.hash = "#/onboard";
+      },
+      async "force-update"() {
+        toast("正在清理旧缓存…");
+        try {
+          if ("serviceWorker" in navigator) {
+            const regs = await navigator.serviceWorker.getRegistrations();
+            await Promise.all(regs.map((r) => r.unregister()));
+          }
+          if ("caches" in window) {
+            const keys = await caches.keys();
+            await Promise.all(keys.map((k) => caches.delete(k)));
+          }
+          sessionStorage.removeItem("fanlai.reloads");
+        } catch (err) {
+          console.warn("[饭来] 清缓存失败", err);
+        }
+        toast("马上重新加载…", "ok");
+        setTimeout(() => location.reload(), 500);
       },
     },
   };

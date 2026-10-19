@@ -6,7 +6,7 @@
    - Supabase API：直连网络，不缓存（数据必须新鲜）
    - 导航请求：先走缓存，失败回退 index.html
    ============================================================ */
-const VERSION = "fanlai-v1.0.1";
+const VERSION = "fanlai-v1.0.6";
 const SHELL = [
   "./",
   "./index.html",
@@ -21,6 +21,7 @@ const SHELL = [
   "./js/lib/catalog.js",
   "./js/lib/ingredients.js",
   "./js/lib/parse.js",
+  "./js/lib/ocr.js",
   "./js/lib/model.js",
   "./js/lib/exportText.js",
   "./js/lib/exportImage.js",
@@ -87,19 +88,20 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // 静态资源：缓存优先
+  // 静态资源：先用缓存秒开，同时后台拉新版（stale-while-revalidate）
+  // —— 这样即使这次用的是旧 JS，下一次打开一定是最新的
   event.respondWith(
     caches.match(req).then((hit) => {
-      if (hit) return hit;
-      return fetch(req)
+      const fetching = fetch(req)
         .then((res) => {
-          if (res.ok) {
+          if (res && res.ok) {
             const copy = res.clone();
             caches.open(VERSION).then((c) => c.put(req, copy));
           }
           return res;
         })
         .catch(() => hit);
+      return hit || fetching;
     })
   );
 });

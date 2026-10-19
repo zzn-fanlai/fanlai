@@ -23,6 +23,7 @@ import {
   inferIngCategory,
 } from "../lib/catalog.js";
 import { parseRecipe, detectPlatform } from "../lib/parse.js";
+import { recognizeImage } from "../lib/ocr.js";
 import { qtyText } from "../lib/ingredients.js";
 import { toast, notice, confirmAction, emptyState, chipRow, rerender } from "../ui/kit.js";
 import { dishRow, ingredientList, stepList, sectionTitle } from "../ui/parts.js";
@@ -33,7 +34,7 @@ let importState = { raw: "", step: "input", parsed: null };
 let editorDraft = null;
 
 export function resetImport() {
-  importState = { raw: "", step: "input", parsed: null };
+  importState = { raw: "", step: "input", parsed: null, deepText: "" };
 }
 
 /* ============================================================
@@ -436,6 +437,15 @@ export function edit(ctx) {
    导入（粘贴分享文案 → 本地解析 → 确认编辑）
    ============================================================ */
 export function importPage(ctx) {
+  // 深链接：#/import?text=<编码后的文本> —— 直接进确认页
+  const deepText = ctx && ctx.query && ctx.query.text;
+  if (deepText && importState.deepText !== deepText) {
+    importState.deepText = deepText;
+    importState.raw = deepText;
+    importState.parsed = parseRecipe(deepText);
+    importState.step = "confirm";
+  }
+
   if (importState.step === "confirm" && importState.parsed) {
     const p = importState.parsed;
     const conf = p.confidence;
@@ -477,14 +487,29 @@ export function importPage(ctx) {
     };
   }
 
+  // 支持深链接：#/import?text=<编码后的文本>（配合 iOS 快捷指令 / 分享）
   return {
     title: "导入菜谱",
     back: "#/dish",
     tab: "cook",
     html: `
-      ${notice("把小红书 / 抖音的分享文案整段粘进来（在 App 里点「分享 → 复制链接」）。<br>解析全在手机上完成，不联网、不上传。")}
+      <div class="card">
+        <div class="card-title">📷 截图导入</div>
+        <div class="small muted" style="line-height:1.7">
+          选一张小红书/抖音的菜谱截图，在手机上直接识别文字。<br>
+          首次使用要下载约 <b>10MB</b> 识别库，之后会缓存。
+        </div>
+        <div class="btn-row mt-10">
+          <label class="btn btn-soft" for="ocr-file" style="flex:1">选截图识别</label>
+          <button class="btn" data-act="read-clip" style="flex:1">读剪贴板</button>
+        </div>
+        <input type="file" id="ocr-file" accept="image/*" hidden />
+        <div id="ocr-status" class="hint mt-6"></div>
+      </div>
+
       <div class="field">
-        <textarea class="input" id="raw-input" style="min-height:180px" placeholder="例如：
+        <label>或者：把文字粘进来</label>
+        <textarea class="input" id="raw-input" style="min-height:160px" placeholder="例如：
 番茄炒蛋
 用料：番茄2个、鸡蛋3个、盐适量
 做法：
@@ -498,8 +523,9 @@ export function importPage(ctx) {
       </div>
       <div class="card flat mt-16">
         <div class="small muted" style="line-height:1.8">
-          <b>为什么是粘贴而不是贴链接？</b><br>
-          网页受跨域与平台风控限制，读不到小红书/抖音的页面内容。复制文案再解析，是既稳定又不泄露账号的做法。
+          <b>识别不准怎么办？</b><br>
+          识别完会进「确认页」，菜名、食材、步骤都能逐条改。<br>
+          <b>为什么不能直接贴链接？</b> 网页受跨域与平台风控限制，读不到小红书/抖音的页面内容，链接里本身也不含步骤。
         </div>
       </div>
     `,
@@ -507,7 +533,7 @@ export function importPage(ctx) {
       "do-parse"() {
         const raw = document.getElementById("raw-input")?.value || "";
         if (!raw.trim()) {
-          toast("先粘贴一段文案");
+          toast("先粘贴一段文案，或选一张截图");
           return;
         }
         importState.raw = raw;
@@ -520,6 +546,21 @@ export function importPage(ctx) {
         resetImport();
         location.hash = "#/dish/new";
       },
+      async "read-clip"() {
+        try {
+          const text = await navigator.clipboard.readText();
+          if (!text || !text.trim()) {
+            toast("剪贴板是空的");
+            return;
+          }
+          const ta = document.getElementById("raw-input");
+          if (ta) ta.value = text;
+          importState.raw = text;
+          toast("读到了，点「识别一下」");
+        } catch (err) {
+          toast("浏览器不让读剪贴板，请长按输入框粘贴", "err");
+        }
+      },
     },
     afterRender(root) {
       const ta = root.querySelector("#raw-input");
@@ -527,6 +568,43 @@ export function importPage(ctx) {
         ta.addEventListener("input", () => (importState.raw = ta.value));
         ta.addEventListener("paste", () => {
           setTimeout(() => (importState.raw = ta.value), 30);
+        });
+      }
+
+      // 截图识别
+      const fileInput = root.querySelector("#ocr-file");
+      const statusEl = root.querySelector("#ocr-status");
+      const setStatus = (t) => {
+        if (statusEl) statusEl.textContent = t;
+      };
+      if (fileInput) {
+        fileInput.addEventListener("change", async () => {
+          const file = fileInput.files && fileInput.files[0];
+          if (!file) return;
+          setStatus("准备中…0%");
+          try {
+            const text = await recognizeImage(file, {
+              onStage: (s) => setStatus(s),
+              onProgress: (p) => setStatus(`正在识别…${Math.round(p * 100)}%`),
+            });
+            if (!text || text.replace(/\s/g, "").length < 4) {
+              setStatus("没认出什么文字，换张清晰点的截图，或者直接粘贴文字吧");
+              return;
+            }
+            const box = document.getElementById("raw-input");
+            if (box) box.value = text;
+            importState.raw = text;
+            setStatus("识别完成，正在解析…");
+            const parsed = parseRecipe(text);
+            importState.parsed = parsed;
+            importState.step = "confirm";
+            rerender();
+          } catch (err) {
+            setStatus(err?.message || String(err));
+            toast("识别失败，可以改用「读剪贴板」或手动粘贴", "err");
+          } finally {
+            fileInput.value = "";
+          }
         });
       }
     },

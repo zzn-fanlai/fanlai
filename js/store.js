@@ -192,10 +192,11 @@ export const store = {
     notify();
   },
 
-  markSeen(kind, ts = nowMs()) {
+  markSeen(kind, ts = nowMs(), { silent = false } = {}) {
+    if ((state.local.lastSeen[kind] || 0) >= ts) return;
     state.local.lastSeen[kind] = ts;
     persist();
-    notify();
+    if (!silent) notify();
   },
 
   setLocal(patch) {
