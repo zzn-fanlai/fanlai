@@ -385,12 +385,17 @@ document.addEventListener("change", (ev) => {
    ============================================================ */
 const BOOT_AT = typeof performance !== "undefined" ? performance.now() : 0;
 
-/** 开启界面至少停留一会儿，避免一闪而过，然后淡出 */
+/** 开启界面至少停留一会儿，避免一闪而过，然后淡出
+ *  优先用 index.html 内联的收尾函数：那样即使本文件是旧缓存，启动页也能正常收掉。 */
 function dismissSplash() {
+  if (typeof window.__fanlaiHideSplash === "function") {
+    window.__fanlaiHideSplash();
+    return;
+  }
   const el = document.getElementById("splash");
   if (!el) return;
   const MIN_MS = 900;
-  const elapsed = (typeof performance !== "undefined" ? performance.now() : 0) - BOOT_AT;
+  const elapsed = BOOT_AT ? performance.now() - BOOT_AT : MIN_MS;
   const wait = Math.max(0, MIN_MS - elapsed);
   setTimeout(() => {
     el.classList.add("hide");

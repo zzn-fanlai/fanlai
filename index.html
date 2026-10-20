@@ -14,6 +14,59 @@
 <link rel="icon" href="./assets/icons/icon-192.png" />
 <link rel="stylesheet" href="./css/tokens.css" />
 <link rel="stylesheet" href="./css/app.css" />
+
+<!-- 开启界面的样式直接内联：即使 app.css 是旧缓存，启动页也不会破版 -->
+<style>
+  #splash {
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background:
+      radial-gradient(circle at 50% 16%, rgba(244, 194, 194, .38), transparent 55%),
+      radial-gradient(circle at 84% 88%, rgba(242, 183, 5, .16), transparent 46%),
+      #fff9f2;
+    transition: opacity 420ms ease, visibility 420ms;
+  }
+  #splash.hide { opacity: 0; visibility: hidden; }
+  #splash .splash-inner { text-align: center; width: 100%; max-width: 360px; }
+  #splash .splash-art {
+    display: block;
+    width: min(76vw, 300px);
+    aspect-ratio: 3 / 4;
+    object-fit: cover;
+    margin: 0 auto 20px;
+    border-radius: 26px;
+    border: 4px solid #fff;
+    box-shadow: 0 10px 34px rgba(61, 43, 31, .18), 0 2px 0 rgba(61, 43, 31, .08);
+  }
+  #splash .splash-fallback { display: none; margin-bottom: 14px; }
+  #splash .splash-logo { font-size: 76px; line-height: 1.1; }
+  #splash .splash-name {
+    font-size: 30px;
+    font-weight: 800;
+    letter-spacing: 8px;
+    text-indent: 8px;
+    color: #3d2b1f;
+  }
+  #splash .splash-tip { margin-top: 6px; font-size: 13px; color: #8a7566; }
+  #splash .splash-dots { display: flex; gap: 7px; justify-content: center; margin-top: 20px; }
+  #splash .splash-dots i {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: #e4572e;
+    opacity: .25;
+    animation: splashDot 1.15s infinite;
+  }
+  #splash .splash-dots i:nth-child(2) { animation-delay: .16s; }
+  #splash .splash-dots i:nth-child(3) { animation-delay: .32s; }
+  @keyframes splashDot {
+    0%, 100% { opacity: .22; transform: scale(.82); }
+    50% { opacity: 1; transform: scale(1); }
+  }
+</style>
 </head>
 <body>
   <div id="splash" class="splash">
@@ -47,10 +100,14 @@
 
   <script src="./js/demo.js"></script>
   <script>
-    // 开启界面：启动图存在就显示，不存在自动退回 emoji 封面
     (function () {
+      var splash = document.getElementById("splash");
       var art = document.getElementById("splash-art");
       var fb = document.getElementById("splash-fallback");
+      var shownAt = Date.now();
+      var gone = false;
+
+      // 启动图 404 时退回 emoji 封面
       function fallback() {
         if (art) art.style.display = "none";
         if (fb) fb.style.display = "block";
@@ -61,6 +118,25 @@
       } else {
         fallback();
       }
+
+      // 全局淡出入口：app.js 会调用它（最少停留 900ms）
+      // 即使 app.js 是旧缓存、根本没调用，下面的兜底计时器也会把启动页收掉
+      window.__fanlaiHideSplash = function () {
+        if (gone || !splash) return;
+        gone = true;
+        var wait = Math.max(0, 900 - (Date.now() - shownAt));
+        setTimeout(function () {
+          splash.classList.add("hide");
+          setTimeout(function () {
+            if (splash && splash.parentNode) splash.parentNode.removeChild(splash);
+          }, 520);
+        }, wait);
+      };
+
+      // 兜底：6 秒还没人收，就自己收掉，绝不把用户堵在启动页
+      setTimeout(function () {
+        window.__fanlaiHideSplash();
+      }, 6000);
     })();
   </script>
   <script type="module" src="./js/app.js"></script>
