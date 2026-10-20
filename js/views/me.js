@@ -16,7 +16,7 @@ import {
 import { downloadBlob } from "../lib/exportImage.js";
 import { statsFor } from "../lib/model.js";
 
-const APP_VERSION = "1.3.1";
+const APP_VERSION = "1.3.3";
 
 /* ============================================================
    我的（首页）
@@ -30,6 +30,7 @@ function envInfo() {
     /iPad|iPhone|iPod/.test(ua) ||
     (typeof navigator !== "undefined" && navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
   const isAndroid = /Android/i.test(ua);
+  const isMIUI = /MIUI|HyperOS|Redmi|Xiaomi|POCO/i.test(ua);
   const inWeChat = /MicroMessenger/i.test(ua);
   const inQQ = /QQ\/|QQBrowser/i.test(ua);
   const inWeibo = /Weibo/i.test(ua);
@@ -42,7 +43,17 @@ function envInfo() {
     standalone = false;
   }
   const installable = !!window.__fanlaiInstallPrompt;
-  return { isIOS, isAndroid, inWeChat, inQQ, inWeibo, standalone, installable, inApp: inWeChat || inQQ || inWeibo };
+  return {
+    isIOS,
+    isAndroid,
+    isMIUI,
+    inWeChat,
+    inQQ,
+    inWeibo,
+    standalone,
+    installable,
+    inApp: inWeChat || inQQ || inWeibo,
+  };
 }
 
 function installCard() {
@@ -93,10 +104,25 @@ function installCard() {
         <li>点右上角 <b>⋮</b> → 找 <b>安装应用</b></li>
         <li>没有这一项就点 <b>添加到主屏幕</b></li>
       </ol>
+      ${
+        e.isMIUI
+          ? notice(
+              `<b>红米 / MIUI 特有坑：</b>MIUI 从 Android 12 起默认禁止应用创建桌面快捷方式，
+               所以「添加到主屏幕」会点了没反应。去放行一次：<br>
+               <b>设置 → 应用设置 → 应用管理 → 找到你用的浏览器 → 权限管理 → 「桌面快捷方式」设为允许</b><br>
+               放行后再试「添加到主屏幕」就成功了。`,
+              "warn"
+            )
+          : notice(
+              "如果完全没有「安装应用」：很多国行安卓没有 Google 服务，Chrome 生成不了真正的 PWA 图标 —— 这时用「添加到主屏幕」也能用，只是个普通快捷方式。",
+              ""
+            )
+      }
       ${notice(
-        "如果完全没有「安装应用」：很多国行安卓没有 Google 服务，Chrome 生成不了真正的 PWA 图标 —— 这时用「添加到主屏幕」也能用，只是个普通快捷方式。",
+        "还不行就换 <b>Firefox</b> 或 <b>Edge</b>：它们的「添加到主屏幕」不依赖 Google 服务，成功率更高。",
         ""
       )}
+      <button class="btn btn-soft btn-block mt-10" data-act="copy-address">复制网址（方便存书签）</button>
     </div>`;
   }
 
@@ -193,6 +219,10 @@ export function home() {
         } catch (err) {
           toast("安装失败：" + (err?.message || err), "err");
         }
+      },
+      async "copy-address"() {
+        const ok = await copyText(location.href.split("#")[0]);
+        toast(ok ? "网址已复制，粘到浏览器书签里" : "复制失败", ok ? "ok" : "err");
       },
     },
   };

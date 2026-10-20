@@ -118,36 +118,63 @@ function isAndroid() {
   return /android/i.test(typeof navigator !== "undefined" ? navigator.userAgent : "");
 }
 
+function isMIUI() {
+  const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
+  return /MIUI|HyperOS|Redmi|Xiaomi|POCO/i.test(ua);
+}
+
 /**
  * 用指定 App 打开链接
- * @returns {"intent"|"scheme"|"failed"}
+ * ------------------------------------------------------------
+ * 现实：国产 App 基本做不到「从外部直接跳到某条内容」——
+ *   · iOS —— scheme 不接受外部内容 ID，且各家不稳定
+ *   · 小米等国产 ROM —— 浏览器普遍拦截 intent://
+ * 所以统一走「先复制链接，再唤醒 App」：
+ *   App 启动时会读剪贴板，弹出"打开剪贴板中的链接"，用户点一下就到内容了。
+ * @returns {Promise<"copied"|"failed">}
  */
-export function openWithApp(appKey, url) {
+export async function openWithApp(appKey, url) {
   const app = APPS[appKey];
   const clean = normalizeLink(url);
   if (!app || !clean) return "failed";
 
-  const webFallback = encodeURIComponent(clean);
+  // ① 先把链接放进剪贴板（这是唯一通用的"带内容打开"方式）
+  let copied = false;
+  try {
+    copied = await copyText(clean);
+  } catch (_) {
+    copied = false;
+  }
+  // 给 toast 一点时间显示，否则跳走后用户看不到
+  await new Promise((r) => setTimeout(r, 130));
+
+  const deep = buildDeepLink(appKey, clean);
 
   try {
     if (isAndroid()) {
-      // Android：intent 语法，App 没装会自动用浏览器打开原链接
-      const u = new URL(clean);
-      const intent =
-        `intent://${u.host}${u.pathname}${u.search}` +
-        `#Intent;scheme=${u.protocol.replace(":", "")};package=${app.pkg};` +
-        `S.browser_fallback_url=${webFallback};end`;
-      window.location.href = intent;
-      return "intent";
+      if (isMIUI()) {
+        // MIUI / HyperOS 普遍拦截 intent://，直接走 scheme
+        window.location.href = deep;
+      } else {
+        const u = new URL(clean);
+        const intent =
+          `intent://${u.host}${u.pathname}${u.search}` +
+          `#Intent;scheme=${u.protocol.replace(":", "")};package=${app.pkg};` +
+          `S.browser_fallback_url=${encodeURIComponent(clean)};end`;
+        window.location.href = intent;
+        // 1 秒后还停在页面上 → intent 没被处理，改用 scheme
+        setTimeout(() => {
+          if (document.visibilityState === "visible") window.location.href = deep;
+        }, 900);
+      }
+    } else {
+      // iOS / 桌面：直接试 scheme
+      window.location.href = deep;
     }
-    // iOS / 桌面：直接试 URL Scheme
-    const deep = buildDeepLink(appKey, clean);
-    if (!deep) return "failed";
-    window.location.href = deep;
-    return "scheme";
   } catch (err) {
     return "failed";
   }
+  return copied ? "copied" : "failed";
 }
 
 /** 链接面板 */
@@ -176,7 +203,11 @@ export function linkSheet({ url, name = "", platform = "" } = {}) {
      <div class="field mt-10">
        <label>用哪个 App 打开</label>
        <div class="chips" data-app-row>${appButtons}</div>
-       <div class="hint">点了没跳转 = 手机没装这个 App，或者被系统拦了 → 用下面的「在浏览器打开」或「复制链接」。</div>
+       <div class="hint">
+         点 App 按钮会 <b>先把链接复制到剪贴板</b>，再打开 App ——
+         回去后 App 一般会提示「打开剪贴板中的链接」，点一下就到那条内容了。<br>
+         点了完全没反应 = 手机没装这个 App。
+       </div>
      </div>
 
      ${hint ? `<div class="notice"><span class="n-ico">💡</span><span>${esc(hint)}</span></div>` : ""}
@@ -200,20 +231,22 @@ export function linkSheet({ url, name = "", platform = "" } = {}) {
         body.querySelector("[data-close-link]").addEventListener("click", closeSheet);
 
         body.querySelectorAll("[data-app]").forEach((btn) => {
-          btn.addEventListener("click", () => {
+          btn.addEventListener("click", async () => {
             const app = APPS[btn.dataset.app];
-            const mode = openWithApp(btn.dataset.app, clean);
-            if (mode === "failed") {
-              toast("打不开，试试复制链接", "err");
-              return;
-            }
-            // iOS 唤起失败时页面不会有任何变化，给个提示兜底
-            if (mode === "scheme") {
-              setTimeout(() => {
-                if (document.visibilityState === "visible") {
-                  toast(`没能打开${app.label}，可能没装这个 App`, "err");
-                }
-              }, 1600);
+            if (btn.dataset.busy === "1") return;
+            btn.dataset.busy = "1";
+
+            const mode = await openWithApp(btn.dataset.app, clean);
+
+            // 用户从 App 返回后，按钮恢复可点
+            setTimeout(() => {
+              btn.dataset.busy = "";
+            }, 2500);
+
+            if (mode === "copied") {
+              toast(`链接已复制，正在打开${app.label}…回去点「打开剪贴板中的链接」`, "ok");
+            } else {
+              toast("复制失败，请手动长按上面的网址复制", "err");
             }
           });
         });
