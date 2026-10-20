@@ -383,6 +383,21 @@ document.addEventListener("change", (ev) => {
 /* ============================================================
    启动
    ============================================================ */
+const BOOT_AT = typeof performance !== "undefined" ? performance.now() : 0;
+
+/** 开启界面至少停留一会儿，避免一闪而过，然后淡出 */
+function dismissSplash() {
+  const el = document.getElementById("splash");
+  if (!el) return;
+  const MIN_MS = 900;
+  const elapsed = (typeof performance !== "undefined" ? performance.now() : 0) - BOOT_AT;
+  const wait = Math.max(0, MIN_MS - elapsed);
+  setTimeout(() => {
+    el.classList.add("hide");
+    setTimeout(() => el.remove(), 520);
+  }, wait);
+}
+
 function boot() {
   if (!store.state.local.onboardSeen && !store.state.profile) {
     if (!location.hash || location.hash === "#/" || location.hash === "#") {
@@ -473,6 +488,9 @@ function boot() {
       document.body.style.overflow = "";
     }
   });
+
+  // 首屏渲染完成 → 淡出开启界面
+  dismissSplash();
 }
 
 /* 供视图模块使用的便捷导出 */

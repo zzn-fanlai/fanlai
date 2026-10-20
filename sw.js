@@ -6,7 +6,7 @@
    - Supabase API：直连网络，不缓存（数据必须新鲜）
    - 导航请求：先走缓存，失败回退 index.html
    ============================================================ */
-const VERSION = "fanlai-v1.3.3";
+const VERSION = "fanlai-v1.3.5";
 const SHELL = [
   "./",
   "./index.html",
@@ -38,6 +38,7 @@ const SHELL = [
   "./js/views/outing.js",
   "./js/views/history.js",
   "./js/views/me.js",
+  "./assets/splash.jpg",
   "./assets/icons/icon-180.png",
   "./assets/icons/icon-192.png",
   "./assets/icons/icon-512.png",

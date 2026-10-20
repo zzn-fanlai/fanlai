@@ -16,13 +16,20 @@
 <link rel="stylesheet" href="./css/app.css" />
 </head>
 <body>
-  <div id="app" class="app" aria-live="polite">
-    <div class="boot">
-      <div class="boot-logo">🍚</div>
-      <div class="boot-name">饭来</div>
-      <div class="boot-tip">正在打开小本子…</div>
+  <div id="splash" class="splash">
+    <div class="splash-inner">
+      <!-- 有 assets/splash.jpg 就显示这张图，没有就退回下面那个 emoji 封面 -->
+      <img class="splash-art" id="splash-art" src="./assets/splash.jpg" alt="" />
+      <div class="splash-fallback" id="splash-fallback">
+        <div class="splash-logo">🍚</div>
+      </div>
+      <div class="splash-name">饭来</div>
+      <div class="splash-tip">两个人的吃饭小本子</div>
+      <div class="splash-dots"><i></i><i></i><i></i></div>
     </div>
   </div>
+
+  <div id="app" class="app" aria-live="polite"></div>
 
   <div id="sheet" class="sheet" hidden>
     <div class="sheet-mask" data-act="sheet-close"></div>
@@ -39,6 +46,23 @@
   </noscript>
 
   <script src="./js/demo.js"></script>
+  <script>
+    // 开启界面：启动图存在就显示，不存在自动退回 emoji 封面
+    (function () {
+      var art = document.getElementById("splash-art");
+      var fb = document.getElementById("splash-fallback");
+      function fallback() {
+        if (art) art.style.display = "none";
+        if (fb) fb.style.display = "block";
+      }
+      if (art) {
+        art.addEventListener("error", fallback);
+        if (art.complete && art.naturalWidth === 0) fallback();
+      } else {
+        fallback();
+      }
+    })();
+  </script>
   <script type="module" src="./js/app.js"></script>
 </body>
 </html>
