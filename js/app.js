@@ -50,12 +50,14 @@ const ROUTES = [
   ["/dine/new", dineView("edit")],
   ["/dine/edit/:id", dineView("edit")],
   ["/dine/invite/:rid", dineView("invite")],
+  ["/dine/random", dineView("random")],
   ["/dine/:id", dineView("detail")],
 
   ["/takeout", takeView("home")],
   ["/takeout/new", takeView("edit")],
   ["/takeout/edit/:id", takeView("edit")],
   ["/takeout/invite/:rid", takeView("invite")],
+  ["/takeout/random", takeView("random")],
   ["/takeout/:id", takeView("detail")],
 
   ["/history", historyView.render],

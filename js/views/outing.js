@@ -83,6 +83,23 @@ export function home({ kind }) {
       }
 
       ${
+        rests.length
+          ? `<div class="list mt-10">
+               <a class="row" href="#/${route}/random">
+                 <div class="row-emoji">🎲</div>
+                 <div class="row-main">
+                   <div class="row-title"><span class="t">今天吃哪家</span></div>
+                   <div class="row-sub"><span>${
+                     isDine(kind) ? "从收藏的餐厅里随机抽一家" : "从常点的外卖店里随机抽一家"
+                   } · ${rests.length} 家候选</span></div>
+                 </div>
+                 <div class="row-aside"><span class="row-chev">›</span></div>
+               </a>
+             </div>`
+          : ""
+      }
+
+      ${
         !rests.length
           ? emptyState({
               emoji: isDine(kind) ? "🍽️" : "🛵",
@@ -643,6 +660,151 @@ export function invite(ctx) {
         createInvite({ kind, restaurant: r, scheduledAt: `${date}T${time}`, note });
         toast("发出去了，等 TA 点头", "ok");
         location.hash = `#/${route}`;
+      },
+    },
+  };
+}
+
+/* ============================================================
+   今天吃哪家（抽签）
+   ============================================================ */
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** 每个区独立记住上次抽到的那家 */
+const diceState = {
+  dine: { rolling: false, pickId: "" },
+  takeout: { rolling: false, pickId: "" },
+};
+
+function restMeta(r, kind) {
+  const bits = [];
+  if (r.avg_price) bits.push(`人均 ¥${r.avg_price}`);
+  if (r.cuisine) bits.push(r.cuisine);
+  if (!isDine(kind) && r.delivery_fee != null && r.delivery_fee !== "") bits.push(`配送 ¥${r.delivery_fee}`);
+  if (isDine(kind) && r.address) bits.push(r.address);
+  return bits.join(" · ");
+}
+
+export function random({ kind }) {
+  const meta = KINDS[kind];
+  const route = kind;
+  const st = diceState[kind] || (diceState[kind] = { rolling: false, pickId: "" });
+  const all = select.restaurants(kind);
+
+  if (!all.length) {
+    return {
+      title: "今天吃哪家",
+      back: `#/${route}`,
+      tab: route,
+      html: emptyState({
+        emoji: "🎲",
+        title: isDine(kind) ? "还没有存过餐厅" : "还没有存过外卖店",
+        hint: isDine(kind)
+          ? "把想吃的那几家存进来，纠结的时候让骰子决定。"
+          : "常点的那几家存进来，抽中就直接点。",
+        action: `<a class="btn btn-primary" href="#/${route}/new?import=1">粘贴分享文案</a>
+                 <div style="height:8px"></div>
+                 <a class="btn" href="#/${route}/new">手动添加</a>`,
+      }),
+    };
+  }
+
+  // 已经在等回复的店先排除，免得抽到"上周刚约过还没去"的那家
+  const busyIds = new Set(
+    select
+      .invites({ kind, status: "pending" })
+      .map((i) => i.restaurant_id)
+      .filter(Boolean)
+  );
+  let pool = all.filter((r) => !busyIds.has(r.id));
+  const excluded = all.length - pool.length;
+  if (!pool.length) pool = all; // 全都约着呢，就别空着了
+
+  const p = all.find((r) => r.id === st.pickId) || null;
+
+  return {
+    title: "今天吃哪家",
+    sub: meta.label,
+    back: `#/${route}`,
+    tab: route,
+    html: `
+      <div class="card sticker" style="text-align:center;padding:18px 14px">
+        <div class="slot">
+          <div class="slot-emoji" id="slot-emoji">${esc(p ? isDine(kind) ? "🍽️" : "🛵" : "🎲")}</div>
+          <div class="slot-name" id="slot-name">${esc(p ? p.name : "按一下抽一家")}</div>
+          <div class="slot-meta" id="slot-meta">${p ? esc(restMeta(p, kind)) : "别纠结了"}</div>
+        </div>
+      </div>
+
+      <button class="btn btn-primary btn-block mt-10" data-act="roll">${p ? "再抽一次" : "抽一家"}</button>
+
+      ${
+        p
+          ? `<div class="btn-row mt-10">
+               <button class="btn" data-act="go-invite" data-id="${attr(p.id)}">发起邀约</button>
+               <button class="btn" data-act="open-rest" data-id="${attr(p.id)}">看详情</button>
+             </div>
+             ${
+               p.link
+                 ? `<div class="btn-row mt-10">${linkChip({
+                     url: p.link,
+                     name: p.name,
+                     platform: p.platform,
+                     label: "看原链接",
+                     cls: "btn-sm btn-soft",
+                   })}</div>`
+                 : ""
+             }`
+          : ""
+      }
+
+      <div class="card flat mt-16">
+        <div class="small muted" style="line-height:1.8">
+          从${isDine(kind) ? "餐厅库" : "外卖店"}里随机抽一家。<br>
+          候选 ${pool.length} 家${excluded ? `（另有 ${excluded} 家正在等回复，这次没参与）` : ""}。<br>
+          <span class="tiny">抽中的话，直接发起邀约——两个人都点头才成行。</span>
+        </div>
+      </div>
+    `,
+    actions: {
+      async roll(el) {
+        if (st.rolling) return;
+        st.rolling = true;
+        el.disabled = true;
+
+        const emojiEl = document.getElementById("slot-emoji");
+        const nameEl = document.getElementById("slot-name");
+        const metaEl = document.getElementById("slot-meta");
+        if (emojiEl) emojiEl.classList.add("rolling");
+
+        const order = pool.slice().sort(() => Math.random() - 0.5);
+        const stopAt = Date.now() + 900;
+        let i = 0;
+        while (Date.now() < stopAt) {
+          const r = order[i++ % order.length];
+          if (emojiEl) emojiEl.textContent = isDine(kind) ? "🍽️" : "🛵";
+          if (nameEl) nameEl.textContent = r.name;
+          if (metaEl) metaEl.textContent = restMeta(r, kind);
+          await sleep(70);
+        }
+
+        const finalPick = pool[Math.floor(Math.random() * pool.length)];
+        if (emojiEl) {
+          emojiEl.classList.remove("rolling");
+          emojiEl.textContent = isDine(kind) ? "🍽️" : "🛵";
+        }
+        if (nameEl) nameEl.textContent = finalPick.name;
+        if (metaEl) metaEl.textContent = restMeta(finalPick, kind);
+        st.pickId = finalPick.id;
+        st.rolling = false;
+        el.disabled = false;
+        rerender();
+      },
+      "go-invite"(el) {
+        location.hash = `#/${route}/invite/${el.dataset.id}`;
+      },
+      "open-rest"(el) {
+        location.hash = `#/${route}/${el.dataset.id}`;
       },
     },
   };
