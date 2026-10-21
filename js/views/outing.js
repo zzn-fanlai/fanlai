@@ -32,6 +32,28 @@ import { cardCanvas, canvasToBlob } from "../lib/exportImage.js";
 
 const isDine = (kind) => kind === "dine";
 
+/** 邀约的日期部分（"2026-10-21T19:00" → "2026-10-21"） */
+const dayOf = (inv) => String(inv.scheduled_at || "").slice(0, 10);
+
+/**
+ * "最近成行的"只留今天及以后的。
+ * 过去的已成行邀约不再占版面 —— 否则越攒越多，首页全是旧行程。
+ * 按日期从近到远排，今天/最近的排在最前面。
+ */
+export function upcomingAgreed(invites, today = todayISO(), limit = 3) {
+  return invites
+    .filter((i) => i.status === "agreed" && (!dayOf(i) || dayOf(i) >= today))
+    .sort((a, b) => {
+      const da = dayOf(a);
+      const db = dayOf(b);
+      if (!da && !db) return 0;
+      if (!da) return 1; // 没日期的排最后
+      if (!db) return -1;
+      return da.localeCompare(db);
+    })
+    .slice(0, limit);
+}
+
 /* ============================================================
    首页
    ============================================================ */
@@ -42,7 +64,9 @@ export function home({ kind }) {
   const all = select.invites({ kind });
   const todo = all.filter((i) => i.status === "pending" && i.proposer !== myRole);
   const mine = all.filter((i) => i.status === "pending" && i.proposer === myRole);
-  const agreed = all.filter((i) => i.status === "agreed").slice(0, 3);
+  const agreed = upcomingAgreed(all);
+  // 已过期的成行记录不再占版面，但给一句提示，免得以为丢了
+  const pastAgreed = all.filter((i) => i.status === "agreed" && dayOf(i) && dayOf(i) < todayISO()).length;
 
   const rests = select.restaurants(kind);
   const byCuisine = new Map();
@@ -77,8 +101,13 @@ export function home({ kind }) {
 
       ${
         agreed.length
-          ? `${sectionTitle("最近成行的", "")}
+          ? `${sectionTitle("已约好的", "")}
              ${agreed.map((i) => inviteCard(i, { kind, myRole, showActions: true })).join("")}`
+          : pastAgreed
+          ? `<div class="card flat mt-6">
+               <div class="small muted">过去成行的 ${pastAgreed} 次已收进
+                 <a href="#/history">吃过什么</a>，这里只显示今天和以后的安排。</div>
+             </div>`
           : ""
       }
 
