@@ -27,6 +27,7 @@ import {
 } from "../ui/kit.js";
 import { restaurantRow, inviteCard, sectionTitle } from "../ui/parts.js";
 import { linkChip } from "../ui/link.js";
+import { prefetch, kmFromHome, distanceText } from "../lib/geo.js";
 import { inviteText } from "../lib/exportText.js";
 import { cardCanvas, canvasToBlob } from "../lib/exportImage.js";
 
@@ -65,10 +66,18 @@ export function home({ kind }) {
   const todo = all.filter((i) => i.status === "pending" && i.proposer !== myRole);
   const mine = all.filter((i) => i.status === "pending" && i.proposer === myRole);
   const agreed = upcomingAgreed(all);
+  // 被我拒掉、但对方还没确认的那些（等对方点「知道了」才消失）
+  const declined = all.filter(
+    (i) => i.status === "declined" && i.proposer === myRole && !store.isInviteAcked(i.id)
+  );
   // 已过期的成行记录不再占版面，但给一句提示，免得以为丢了
   const pastAgreed = all.filter((i) => i.status === "agreed" && dayOf(i) && dayOf(i) < todayISO()).length;
 
   const rests = select.restaurants(kind);
+  // 配了高德 Key + 家庭住址时，顺手把列表地址批量解析一遍（结果会缓存，只请求一次）
+  try {
+    prefetch(rests.map((r) => r.address));
+  } catch (_) {}
   const byCuisine = new Map();
   for (const r of rests) {
     const c = r.cuisine || "其他";
@@ -96,6 +105,13 @@ export function home({ kind }) {
         mine.length
           ? `${sectionTitle("你的邀约在等回复", "")}
              ${mine.map((i) => inviteCard(i, { kind, myRole, showActions: true })).join("")}`
+          : ""
+      }
+
+      ${
+        declined.length
+          ? `${sectionTitle("被拒绝的，等你确认", `<span class="badge">${declined.length}</span>`)}
+             ${declined.map((i) => inviteCard(i, { kind, myRole, showActions: true })).join("")}`
           : ""
       }
 
@@ -170,6 +186,11 @@ export function home({ kind }) {
           row.style.display = !v || (row.dataset.cuisine || "") === v ? "" : "none";
         });
         el.parentElement.querySelectorAll(".chip").forEach((c) => c.classList.toggle("on", c === el));
+      },
+      "ack-invite"(el) {
+        store.ackInvite(el.dataset.id);
+        toast("已清掉，这条不再占着队列");
+        rerender();
       },
       async "agree-invite"(el) {
         const inv = store.get("invites", el.dataset.id);
@@ -556,6 +577,11 @@ export function detail(ctx) {
         <div class="divider"></div>
         <div class="small" style="line-height:1.9">
           ${r.address ? `<div>📍 ${esc(r.address)}</div>` : ""}
+          ${
+            kmFromHome(r.address) != null
+              ? `<div>🚶 离家 ${esc(distanceText(kmFromHome(r.address)))}</div>`
+              : ""
+          }
           ${
             !isDine(kind)
               ? `<div>🛵 配送费 ${r.delivery_fee != null ? "¥" + esc(r.delivery_fee) : "未填"} · 约 ${

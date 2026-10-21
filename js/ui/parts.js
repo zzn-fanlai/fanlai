@@ -15,6 +15,7 @@ import {
 } from "../lib/catalog.js";
 import { badge, heartRating, notice } from "./kit.js";
 import { linkChip } from "./link.js";
+import { kmFromHome, distanceText } from "../lib/geo.js";
 
 export function dishRow(dish, { act = "open-dish", right = '<span class="row-chev">›</span>' } = {}) {
   const meta = [];
@@ -42,8 +43,12 @@ export function restaurantRow(r, { act = "open-rest", right = '<span class="row-
   if (r.cuisine) meta.push(r.cuisine);
   if (r.avg_price) meta.push(`人均 ¥${r.avg_price}`);
   if (r.kind === "takeout" && r.delivery_fee) meta.push(`配送 ¥${r.delivery_fee}`);
-  if (r.kind === "dine" && r.address) meta.push(r.address);
-  if (r.kind === "takeout" && r.address) meta.push(r.address);
+  if (r.address) meta.push(r.address);
+
+  // 离家距离（配了高德 Key + 设置了家庭住址才会出现）
+  const km = kmFromHome(r.address);
+  const distLine = km == null ? "" : `<div class="row-dist">📍 离家 ${distanceText(km)}</div>`;
+
   return `<div class="row" data-act="${act}" data-id="${attr(r.id)}" data-cuisine="${attr(
     r.cuisine || ""
   )}" role="button" tabindex="0">
@@ -53,6 +58,7 @@ export function restaurantRow(r, { act = "open-rest", right = '<span class="row-
       <div class="row-sub">${meta.map((m) => `<span>${esc(m)}</span>`).join("")}
         ${r.craving ? `<span style="color:var(--tomato)">${heartRating(r.craving)}</span>` : ""}
       </div>
+      ${distLine}
     </div>
     <div class="row-aside">
       ${linkChip({ url: r.link, name: r.name, platform: r.platform, label: "原链接" })}
@@ -184,6 +190,22 @@ export function inviteCard(inv, { kind, myRole = "chef", showActions = true } = 
              <button class="btn btn-sm btn-soft" data-act="card-invite" data-id="${attr(inv.id)}">饭局卡片</button>
              <button class="btn btn-sm btn-ghost" data-act="edit-invite" data-id="${attr(inv.id)}">改金额/请客</button>
              <button class="btn btn-sm btn-danger" data-act="cancel-invite" data-id="${attr(inv.id)}">取消这次</button>
+           </div>`
+        : ""
+    }
+    ${
+      showActions && inv.status === "declined"
+        ? `<div class="req-acts">
+             ${
+               inv.decision_note
+                 ? `<span class="muted small" style="align-self:center">TA 说：${esc(inv.decision_note)}</span>`
+                 : ""
+             }
+             ${
+               isMine
+                 ? `<button class="btn btn-sm btn-soft" data-act="ack-invite" data-id="${attr(inv.id)}">知道了，清掉</button>`
+                 : ""
+             }
            </div>`
         : ""
     }

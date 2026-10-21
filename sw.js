@@ -1,4 +1,4 @@
-﻿/* ============================================================
+/* ============================================================
    饭来 · Service Worker（离线可用）
    ------------------------------------------------------------
    策略：
@@ -6,7 +6,7 @@
    - Supabase API：直连网络，不缓存（数据必须新鲜）
    - 导航请求：先走缓存，失败回退 index.html
    ============================================================ */
-const VERSION = "fanlai-v1.3.8";
+const VERSION = "fanlai-v1.4.2";
 const SHELL = [
   "./",
   "./index.html",
@@ -20,6 +20,8 @@ const SHELL = [
   "./js/lib/util.js",
   "./js/lib/catalog.js",
   "./js/lib/ingredients.js",
+  "./js/lib/geo.js",
+  "./js/lib/notify.js",
   "./js/lib/parse.js",
   "./js/lib/ocr.js",
   "./js/lib/model.js",

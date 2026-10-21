@@ -1,4 +1,4 @@
-﻿/* ============================================================
+/* ============================================================
    饭来 · 我的：资料 / 同步设置 / 备份 / 关于
    ============================================================ */
 import { store, select } from "../store.js";
@@ -12,11 +12,40 @@ import {
   askText,
   emptyState,
   rerender,
+  showBanner,
 } from "../ui/kit.js";
 import { downloadBlob } from "../lib/exportImage.js";
 import { statsFor } from "../lib/model.js";
+import {
+  getConfig as getGeoConfig,
+  setConfig as setGeoConfig,
+  getHome,
+  setHome,
+  clearHome,
+  isConfigured,
+  geocode,
+  reverseGeocode,
+  loadAmap,
+} from "../lib/geo.js";
+import { permissionLabel, ask as askNotify, systemNotify, vibrate } from "../lib/notify.js";
 
-const APP_VERSION = "1.3.8";
+const APP_VERSION = "1.4.2";
+
+/* ---------- 地址 / 提醒 的状态摘要（"我的"首页用） ---------- */
+function geoSummary() {
+  const home = getHome();
+  const keyed = isConfigured();
+  if (keyed && home) return `家：${home.address} · 可算距离`;
+  if (home) return "设了家地址，但还没填高德 Key（算不出距离）";
+  if (keyed) return "有 Key，还没设家庭住址";
+  return "设家庭住址后，外食/外卖会显示离家距离";
+}
+
+function notifySummary() {
+  const l = permissionLabel();
+  if (l.text.startsWith("已开启")) return "已开启，收到邀约会提示你";
+  return l.text;
+}
 
 /* ============================================================
    我的（首页）
@@ -185,6 +214,22 @@ export function home() {
           <div class="row-main">
             <div class="row-title"><span class="t">数据备份</span></div>
             <div class="row-sub"><span>导出 / 导入 JSON</span></div>
+          </div>
+          <div class="row-aside"><span class="row-chev">›</span></div>
+        </a>
+        <a class="row" href="#/me/geo">
+          <div class="row-emoji">📍</div>
+          <div class="row-main">
+            <div class="row-title"><span class="t">地址与距离</span></div>
+            <div class="row-sub"><span>${geoSummary()}</span></div>
+          </div>
+          <div class="row-aside"><span class="row-chev">›</span></div>
+        </a>
+        <a class="row" href="#/me/notify">
+          <div class="row-emoji">🔔</div>
+          <div class="row-main">
+            <div class="row-title"><span class="t">消息提醒</span></div>
+            <div class="row-sub"><span>${notifySummary()}</span></div>
           </div>
           <div class="row-aside"><span class="row-chev">›</span></div>
         </a>
@@ -641,6 +686,262 @@ export function about() {
         }
         toast("马上重新加载…", "ok");
         setTimeout(() => location.reload(), 500);
+      },
+    },
+  };
+}
+
+/* ============================================================
+   地址与距离
+   ============================================================ */
+export function geoPage() {
+  const cfg = getGeoConfig();
+  const home = getHome();
+  const keyed = isConfigured();
+
+  return {
+    title: "地址与距离",
+    back: "#/me",
+    tab: "me",
+    html: `
+      <div class="card">
+        <div class="card-title">🏠 家庭住址</div>
+        <div class="field">
+          <label>地址（写到街道 + 门牌最准）</label>
+          <input class="input" id="home-addr" placeholder="北京市朝阳区望京街 9 号院 3 号楼"
+                 value="${attr(home ? home.address : "")}" />
+        </div>
+        <div class="btn-row mt-6">
+          <button class="btn btn-primary" data-act="save-home">保存</button>
+          <button class="btn" data-act="use-current">用当前位置</button>
+          ${home ? `<button class="btn btn-ghost" data-act="clear-home">清除</button>` : ""}
+        </div>
+        ${
+          home && home.lng != null
+            ? `<div class="hint mt-6">已记录坐标：${home.lng.toFixed(5)}, ${home.lat.toFixed(5)}</div>`
+            : home
+            ? `<div class="hint mt-6">只存了文字，还没算坐标 —— 填好高德 Key 后点一次「保存」就能算。</div>`
+            : ""
+        }
+        <div class="hint mt-6">地址只存在这台手机上，不会同步到云端。</div>
+      </div>
+
+      <div class="card mt-16">
+        <div class="card-title">🗺️ 高德 Key（算距离用）</div>
+        ${
+          keyed
+            ? notice("已配置：外食/外卖里的店铺会显示离家距离。", "ok")
+            : notice(
+                "还没配置。距离必须靠地图服务把地址转成坐标，高德对个人开发者免费。",
+                "warn"
+              )
+        }
+        <div class="field mt-10">
+          <label>Web 端（JS API）Key</label>
+          <input class="input" id="amap-key" placeholder="32 位字符" value="${attr(cfg.key)}" />
+        </div>
+        <div class="field">
+          <label>安全密钥 securityJsCode（和安全码配套）</label>
+          <input class="input" id="amap-sec" placeholder="2021 年 12 月后创建的 Key 必须有" value="${attr(
+            cfg.security
+          )}" />
+        </div>
+        <div class="btn-row mt-6">
+          <button class="btn btn-primary" data-act="save-key">保存 Key</button>
+          <button class="btn" data-act="test-geo">测试一下</button>
+        </div>
+        <div class="hint mt-6" style="line-height:1.8">
+          申请步骤：打开 <b>lbs.amap.com</b> → 注册/实名 → 控制台 → 应用管理 → 创建应用
+          → 添加 Key → 服务平台选 <b>Web端(JS API)</b> → 域名白名单填
+          <b>zzn-fanlai.github.io</b> → 保存后把 Key 和安全密钥复制到上面。
+        </div>
+      </div>
+
+      <div class="card flat mt-16">
+        <div class="small muted" style="line-height:1.9">
+          距离怎么算的：<br>
+          · 把店铺地址转成坐标（高德）→ 算和你家的<b>直线距离</b><br>
+          · 3 公里内按 4.5km/h 估步行时间，更远按 15km/h 估骑行时间<br>
+          · 不调路线规划，所以是估算值，够用来判断"要不要去"
+        </div>
+      </div>
+    `,
+    actions: {
+      async "save-home"() {
+        const el = document.getElementById("home-addr");
+        const addr = String(el?.value || "").trim();
+        if (!addr) {
+          toast("先写个地址");
+          return;
+        }
+        if (!isConfigured()) {
+          setHome({ address: addr, lng: null, lat: null });
+          toast("地址存好了；填上高德 Key 才能算距离", "ok");
+          rerender();
+          return;
+        }
+        toast("正在解析地址…");
+        try {
+          const coord = await geocode(addr);
+          if (!coord) {
+            setHome({ address: addr, lng: null, lat: null });
+            toast("地图没认出这个地址，换个写法试试", "err");
+          } else {
+            setHome({ address: addr, lng: coord.lng, lat: coord.lat });
+            toast("存好了，能算距离了", "ok");
+          }
+        } catch (err) {
+          setHome({ address: addr, lng: null, lat: null });
+          toast("Key 用不了：" + (err?.message || err), "err");
+        }
+        rerender();
+      },
+
+      async "use-current"() {
+        if (!navigator.geolocation) {
+          toast("这个浏览器不支持定位");
+          return;
+        }
+        toast("正在定位…");
+        navigator.geolocation.getCurrentPosition(
+          async (pos) => {
+            const { longitude, latitude } = pos.coords;
+            let addr = "";
+            if (isConfigured()) {
+              try {
+                addr = await reverseGeocode(longitude, latitude);
+              } catch (_) {
+                addr = "";
+              }
+            }
+            setHome({ address: addr || `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`, lng: longitude, lat: latitude });
+            toast(addr ? "定位好了" : "存了坐标，地址可以自己补一句", "ok");
+            rerender();
+          },
+          (err) => {
+            toast("定位失败：" + (err?.message || "没给权限"), "err");
+          },
+          { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 }
+        );
+      },
+
+      "clear-home"() {
+        clearHome();
+        toast("已清除");
+        rerender();
+      },
+
+      "save-key"() {
+        const key = String(document.getElementById("amap-key")?.value || "").trim();
+        const sec = String(document.getElementById("amap-sec")?.value || "").trim();
+        if (!key) {
+          toast("Key 不能为空");
+          return;
+        }
+        setGeoConfig({ key, security: sec });
+        toast("Key 存好了", "ok");
+        rerender();
+      },
+
+      async "test-geo"() {
+        const key = String(document.getElementById("amap-key")?.value || "").trim();
+        const sec = String(document.getElementById("amap-sec")?.value || "").trim();
+        if (key) setGeoConfig({ key, security: sec });
+        if (!isConfigured()) {
+          toast("先填 Key");
+          return;
+        }
+        toast("正在测试…");
+        try {
+          await loadAmap();
+          const home = getHome();
+          const target = home?.address || "北京市朝阳区望京街 9 号院";
+          const coord = await geocode(target);
+          if (coord) toast(`能用：${target} → ${coord.lng.toFixed(4)}, ${coord.lat.toFixed(4)}`, "ok");
+          else toast("脚本加载了，但没认出这个地址", "err");
+        } catch (err) {
+          toast("失败：" + (err?.message || err), "err");
+        }
+      },
+    },
+  };
+}
+
+/* ============================================================
+   消息提醒
+   ============================================================ */
+export function notifyPage() {
+  const label = permissionLabel();
+
+  return {
+    title: "消息提醒",
+    back: "#/me",
+    tab: "me",
+    html: `
+      ${notice(label.text, label.kind === "ok" ? "ok" : label.kind === "warn" ? "warn" : "")}
+
+      <div class="card mt-10">
+        <div class="card-title">🔔 什么时候提醒你</div>
+        <div class="small muted" style="line-height:1.9">
+          · TA 发起邀约，等你点头<br>
+          · 你的邀约被同意 / 被拒绝<br>
+          · TA 点了一道菜，等你接单
+        </div>
+        <button class="btn btn-primary btn-block mt-10" data-act="enable-notify">开启通知</button>
+        <button class="btn btn-soft btn-block mt-6" data-act="test-notify">发一条测试提醒</button>
+      </div>
+
+      <div class="card flat mt-16">
+        <div class="small muted" style="line-height:1.9">
+          提醒分三层，按手机能力自动降级：<br>
+          ① <b>站内横幅</b> —— 页面开着时，顶部滑下来一条，点一下直接跳过去<br>
+          ② <b>系统通知</b> —— App 切到后台时弹在通知栏（需要允许一次通知权限）<br>
+          ③ <b>振动</b> —— 手机上配合横幅轻震一下<br><br>
+          ⚠️ App 完全关掉后收不到 —— 那需要服务器推送（要额外部署），这次没做。
+        </div>
+      </div>
+    `,
+    actions: {
+      async "enable-notify"() {
+        const res = await askNotify();
+        if (res === "granted") {
+          vibrate();
+          toast("好了，之后会提醒你", "ok");
+        } else if (res === "denied") {
+          toast("被拒绝了，只能看站内横幅；可以去浏览器设置里改", "err");
+        } else if (res === "unsupported") {
+          toast("这个浏览器不支持系统通知，站内横幅照样有");
+        } else {
+          toast("没有授权成功");
+        }
+        rerender();
+      },
+
+      async "test-notify"() {
+        // 横幅不依赖权限，先给你看一眼效果
+        showBanner({
+          emoji: "🍳",
+          title: "有人点菜了",
+          body: "想吃「番茄炒蛋」，等你接单",
+          href: "",
+          actionText: "知道了",
+          ms: 6000,
+        });
+        vibrate();
+
+        const res = await askNotify();
+        if (res !== "granted") {
+          toast("横幅已经显示了；系统通知要先允许权限", res === "denied" ? "err" : "");
+          return;
+        }
+        const ok = systemNotify({
+          title: "饭来 · 测试提醒",
+          body: "看到这条说明通知通了",
+          tag: "fanlai-test",
+          href: "#/me",
+          force: true,
+        });
+        toast(ok ? "横幅 + 通知都发了，看看通知栏" : "这台设备不支持弹通知，横幅可用", ok ? "ok" : "err");
       },
     },
   };

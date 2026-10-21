@@ -31,7 +31,8 @@ function hostOf(url) {
 function shortLinkHint(host) {
   if (/xhslink|xhs\.link/i.test(host)) return "小红书短链：浏览器里可能要求先装小红书 App，打不开就复制到小红书搜索。";
   if (/douyin|iesdouyin/i.test(host)) return "抖音短链：可能要装 App 才能看，打不开就复制到抖音打开。";
-  if (/meituan|dianping|m\.dianping/i.test(host)) return "美团/点评链接：手机上可能需要装对应 App。";
+  if (/dianping/i.test(host)) return "点评链接：网页版经常要求登录或跳 App，手机上直接点「大众点评」更快。";
+  if (/meituan/i.test(host)) return "美团链接：手机上可能需要装美团 App。";
   return "";
 }
 
@@ -66,16 +67,20 @@ export function openLinkDirect(url) {
 export const APPS = {
   xhs: { key: "xhs", label: "小红书", emoji: "📕", pkg: "com.xingin.xhs", scheme: "xhsdiscover" },
   douyin: { key: "douyin", label: "抖音", emoji: "🎵", pkg: "com.ss.android.ugc.aweme", scheme: "snssdk1128" },
+  dianping: { key: "dianping", label: "大众点评", emoji: "🟠", pkg: "com.dianping.v1", scheme: "dianping" },
   meituan: { key: "meituan", label: "美团", emoji: "🟡", pkg: "com.sankuai.meituan", scheme: "imeituan" },
   taobao: { key: "taobao", label: "淘宝", emoji: "🧡", pkg: "com.taobao.taobao", scheme: "taobao" },
 };
 
-/** 根据链接域名猜它属于哪个 App */
+/** 根据链接域名猜它属于哪个 App
+ *  点评和美团是两套 App（虽然同属一个集团），必须分开识别，
+ *  否则 dianping.com 的链接会被扔进美团，打开是错的。 */
 export function detectApp(url) {
   const s = String(url || "");
   if (/xiaohongshu|xhslink|xhs\.link/i.test(s)) return "xhs";
   if (/douyin|iesdouyin/i.test(s)) return "douyin";
-  if (/meituan|dianping/i.test(s)) return "meituan";
+  if (/dianping|dpurl|meituan\.net\/dp/i.test(s)) return "dianping";
+  if (/meituan/i.test(s)) return "meituan";
   if (/taobao|tmall/i.test(s)) return "taobao";
   return "";
 }
@@ -105,6 +110,9 @@ export function buildDeepLink(app, url) {
       return id ? `xhsdiscover://noteDetail?noteId=${id}` : "xhsdiscover://";
     case "douyin":
       return id ? `snssdk1128://aweme/detail/${id}` : "snssdk1128://";
+    case "dianping":
+      // 点评不开放"外部直接跳店铺"的 scheme，只能进 App；靠剪贴板定位内容
+      return "dianping://";
     case "meituan":
       return "imeituan://";
     case "taobao":

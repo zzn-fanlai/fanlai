@@ -23,6 +23,54 @@ export function rerender() {
   window.dispatchEvent(new Event("fanlai:rerender"));
 }
 
+/* ---------- 站内横幅（收到邀约等） ---------- */
+let bannerEl = null;
+let bannerTimer = null;
+
+export function hideBanner() {
+  if (!bannerEl) return;
+  const el = bannerEl;
+  bannerEl = null;
+  clearTimeout(bannerTimer);
+  el.style.transition = "opacity 240ms ease, transform 240ms ease";
+  el.style.opacity = "0";
+  el.style.transform = "translateY(-140%)";
+  setTimeout(() => el.remove(), 260);
+}
+
+export function showBanner({ emoji = "🔔", title = "", body = "", href = "", actionText = "看看", ms = 9000 } = {}) {
+  if (!document.body) return;
+  if (bannerEl) {
+    bannerEl.remove();
+    bannerEl = null;
+  }
+  clearTimeout(bannerTimer);
+
+  const el = document.createElement("div");
+  el.className = "banner";
+  el.innerHTML = `
+    <div class="banner-emoji">${esc(emoji)}</div>
+    <div class="banner-main">
+      <div class="banner-title">${esc(title)}</div>
+      <div class="banner-body">${esc(body)}</div>
+    </div>
+    ${href ? `<button class="btn btn-sm btn-primary" data-banner-go>${esc(actionText)}</button>` : ""}
+    <button class="banner-x" data-banner-close aria-label="关闭">×</button>`;
+  document.body.appendChild(el);
+  bannerEl = el;
+
+  el.querySelector("[data-banner-close]").addEventListener("click", hideBanner);
+  const go = el.querySelector("[data-banner-go]");
+  if (go) {
+    go.addEventListener("click", () => {
+      hideBanner();
+      if (href) location.hash = href;
+    });
+  }
+  if (ms > 0) bannerTimer = setTimeout(hideBanner, ms);
+  return el;
+}
+
 /* ---------- 底部弹层（长表单用） ---------- */
 export function openSheet(html, { onMount, onClose } = {}) {
   const root = document.getElementById("sheet");

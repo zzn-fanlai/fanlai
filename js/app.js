@@ -4,8 +4,10 @@
 import { store, select } from "./store.js";
 import { sync } from "./sync.js";
 import { esc, attr, todayISO, fmtMD, isoWeekday, relativeDay } from "./lib/util.js";
-import { closeSheet, toast } from "./ui/kit.js";
+import { closeSheet, toast, showBanner } from "./ui/kit.js";
 import { linkSheet } from "./ui/link.js";
+import { systemNotify, vibrate } from "./lib/notify.js";
+import * as geo from "./lib/geo.js";
 
 import * as onboard from "./views/onboard.js";
 import * as cook from "./views/cook.js";
@@ -64,6 +66,8 @@ const ROUTES = [
   ["/me", me.home],
   ["/me/profile", me.profile],
   ["/me/sync", me.syncPage],
+  ["/me/geo", me.geoPage],
+  ["/me/notify", me.notifyPage],
   ["/me/backup", me.backup],
   ["/me/about", me.about],
 ];
@@ -405,6 +409,115 @@ function dismissSplash() {
   }, wait);
 }
 
+/* ============================================================
+   提醒：站内横幅（ui/kit）+ 系统通知
+   ============================================================ */
+/** 把一条事件变成横幅 + 系统通知 */
+function fireReminder(ev) {
+  showBanner(ev.banner);
+  const pushed = systemNotify({
+    title: ev.notify.title,
+    body: ev.notify.body,
+    tag: ev.tag,
+    href: ev.banner.href,
+  });
+  vibrate();
+  return pushed;
+}
+
+/**
+ * 监听"对方"带来的变化：
+ * 用自己的 deviceId 过滤掉本机操作，只提醒别人做的事。
+ */
+function startReminders() {
+  const myDev = () => store.state.profile?.deviceId || "";
+  const keyOf = (t, r) => `${t}:${r.id}`;
+
+  function snapshot() {
+    const map = new Map();
+    (store.state.data.invites || []).forEach((i) => {
+      map.set(keyOf("inv", i), {
+        status: i.status,
+        by: i.updated_by || "",
+        kind: i.kind,
+        name: (i.restaurant_snapshot && i.restaurant_snapshot.name) || "那家店",
+      });
+    });
+    (store.state.data.requests || []).forEach((r) => {
+      map.set(keyOf("req", r), {
+        status: r.status,
+        by: r.updated_by || "",
+        title: (r.dish_snapshot && r.dish_snapshot.title) || "一道菜",
+      });
+    });
+    return map;
+  }
+
+  let prev = snapshot();
+
+  store.subscribe(() => {
+    const cur = snapshot();
+    const me = myDev();
+    const events = [];
+
+    cur.forEach((v, k) => {
+      const old = prev.get(k);
+      if (old && old.status === v.status) return; // 没变化
+      if (v.by && v.by === me) return; // 我自己操作的，不提醒
+
+      if (k.startsWith("inv:")) {
+        const where = v.kind === "dine" ? "外食" : "外卖";
+        if (!old && v.status === "pending") {
+          events.push({
+            tag: "invite-new",
+            banner: { emoji: "🥂", title: "收到一个邀约", body: `${v.name} · ${where}，等你点头`, href: `#/${v.kind}` },
+            notify: { title: "饭来 · 收到邀约", body: `${v.name} · ${where}` },
+          });
+        } else if (old && v.status === "agreed") {
+          events.push({
+            tag: "invite-agreed",
+            banner: { emoji: "✅", title: "邀约成了", body: `${v.name}，可以出发了`, href: `#/${v.kind}` },
+            notify: { title: "饭来 · 邀约成了", body: v.name },
+          });
+        } else if (old && v.status === "declined") {
+          events.push({
+            tag: "invite-declined",
+            banner: { emoji: "😕", title: "邀约被拒了", body: `${v.name}，换个地方？`, href: `#/${v.kind}` },
+            notify: { title: "饭来 · 邀约被拒", body: v.name },
+          });
+        }
+      } else {
+        if (!old && v.status === "pending") {
+          events.push({
+            tag: "request-new",
+            banner: { emoji: "🍳", title: "有人点菜了", body: `想吃「${v.title}」，等你接单`, href: "#/cook" },
+            notify: { title: "饭来 · 有人点菜", body: `想吃「${v.title}」` },
+          });
+        } else if (old && ["accepted", "swapped", "postponed", "rejected"].includes(v.status)) {
+          const word =
+            v.status === "accepted" ? "接单了" : v.status === "rejected" ? "拒绝了" : v.status === "swapped" ? "换了菜" : "推后了";
+          events.push({
+            tag: "request-decided",
+            banner: { emoji: "📣", title: `你的点菜有结果：${word}`, body: `「${v.title}」`, href: "#/cook" },
+            notify: { title: "饭来 · 点菜有结果", body: `${v.title} · ${word}` },
+          });
+        }
+      }
+    });
+
+    prev = cur;
+    if (!events.length) return;
+
+    // 一次来一堆就合并成一条，别连环弹
+    const first = events[0];
+    if (events.length > 1) {
+      first.banner.body += `（还有 ${events.length - 1} 条）`;
+      first.notify.body += `（还有 ${events.length - 1} 条）`;
+    }
+    fireReminder(first);
+  });
+}
+
 function boot() {
   if (!store.state.local.onboardSeen && !store.state.profile) {
     if (!location.hash || location.hash === "#/" || location.hash === "#") {
@@ -494,6 +607,20 @@ function boot() {
     if (document.visibilityState === "visible") {
       document.body.style.overflow = "";
     }
+  });
+
+  // 对方的新邀约 / 点菜 → 横幅 + 通知
+  startReminders();
+
+  // 地址解析完成后刷新一次（距离从无到有）
+  let geoRenderTimer = null;
+  geo.subscribe(() => {
+    clearTimeout(geoRenderTimer);
+    geoRenderTimer = setTimeout(() => {
+      const a = document.activeElement;
+      if (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return; // 正在输入不打断
+      render();
+    }, 320);
   });
 
   // 首屏渲染完成 → 淡出开启界面

@@ -38,6 +38,7 @@ function blankState() {
     },
     local: {
       lastSeen: {}, // { requests: ts, invites: ts }
+      ackedInvites: [], // 提出方已确认的"被拒邀约" id
       onboardSeen: false,
       installHintSeen: false,
     },
@@ -197,6 +198,29 @@ export const store = {
     state.local.lastSeen[kind] = ts;
     persist();
     if (!silent) notify();
+  },
+
+  /* ---------- 被拒邀约的"我确认过了" ----------
+     只影响提出方自己的待办队列：确认后这条不再出现在首页。 */
+  isInviteAcked(id) {
+    return (state.local.ackedInvites || []).includes(id);
+  },
+
+  ackInvite(id) {
+    if (!id) return;
+    const list = state.local.ackedInvites || [];
+    if (!list.includes(id)) list.push(id);
+    // 只留最近 200 条，避免无限增长
+    state.local.ackedInvites = list.slice(-200);
+    persist();
+    notify();
+  },
+
+  unackInvite(id) {
+    const list = state.local.ackedInvites || [];
+    state.local.ackedInvites = list.filter((x) => x !== id);
+    persist();
+    notify();
   },
 
   setLocal(patch) {
