@@ -1,4 +1,4 @@
-/* ============================================================
+﻿/* ============================================================
    饭来 · 我的：资料 / 同步设置 / 备份 / 关于
    ============================================================ */
 import { store, select } from "../store.js";
@@ -26,18 +26,24 @@ import {
   geocode,
   reverseGeocode,
   loadAmap,
+  wgs84ToGcj02,
+  geoCheck,
+  forgetAddress,
+  clearGeoCache,
+  distanceText,
 } from "../lib/geo.js";
 import { permissionLabel, ask as askNotify, systemNotify, vibrate } from "../lib/notify.js";
 
-const APP_VERSION = "1.4.2";
+const APP_VERSION = "1.4.3";
 
 /* ---------- 地址 / 提醒 的状态摘要（"我的"首页用） ---------- */
 function geoSummary() {
   const home = getHome();
   const keyed = isConfigured();
-  if (keyed && home) return `家：${home.address} · 可算距离`;
+  if (keyed && home && home.lng != null) return `家：${home.address} · 可算距离`;
+  if (keyed && home) return `家：${home.address} · 坐标还没算出来，点进去重存一次`;
+  if (keyed) return "还没设家庭住址，设完外食/外卖会显示离家距离";
   if (home) return "设了家地址，但还没填高德 Key（算不出距离）";
-  if (keyed) return "有 Key，还没设家庭住址";
   return "设家庭住址后，外食/外卖会显示离家距离";
 }
 
@@ -699,6 +705,31 @@ export function geoPage() {
   const home = getHome();
   const keyed = isConfigured();
 
+  // 店铺地址的解析状态（"有些地址不显示距离"时，这里能直接看出是哪一家）
+  const addrRows = keyed
+    ? (store.list("restaurants") || [])
+        .filter((r) => !r.deleted && String(r.address || "").trim())
+        .slice(0, 12)
+        .map((r) => {
+          const c = geoCheck(r.address);
+          const tag =
+            c.status === "ok"
+              ? `<span style="color:var(--sage);font-weight:700">✓ ${esc(distanceText(c.km) || "已定位")}</span>`
+              : c.status === "fail"
+              ? `<span style="color:var(--tomato);font-weight:700">✗ 解析失败</span>`
+              : c.status === "amap-error"
+              ? `<span style="color:var(--tomato);font-weight:700">! Key 不可用</span>`
+              : c.status === "pending"
+              ? `<span class="muted">解析中…</span>`
+              : `<span class="muted">未解析</span>`;
+          return `<div style="padding:8px 0;border-bottom:1px dashed var(--line-2)">
+            <div class="small" style="font-weight:600">${esc(r.name || "未命名")} ${tag}</div>
+            <div class="tiny muted" style="margin-top:2px">${esc(r.address)}</div>
+          </div>`;
+        })
+        .join("")
+    : "";
+
   return {
     title: "地址与距离",
     back: "#/me",
@@ -761,10 +792,21 @@ export function geoPage() {
         <div class="small muted" style="line-height:1.9">
           距离怎么算的：<br>
           · 把店铺地址转成坐标（高德）→ 算和你家的<b>直线距离</b><br>
-          · 3 公里内按 4.5km/h 估步行时间，更远按 15km/h 估骑行时间<br>
-          · 不调路线规划，所以是估算值，够用来判断"要不要去"
+          · 时间按直线 × 1.25 的绕路系数估算：1.5 公里内给步行，更远给骑车<br>
+          · 手机定位是用 GPS 坐标换算成高德坐标的，两者相差几百米，已做转换
         </div>
       </div>
+
+      ${
+        addrRows
+          ? `<div class="card mt-16">
+               <div class="card-title">📌 店铺地址解析情况</div>
+               <div class="small muted" style="margin-bottom:6px">标「解析失败」的换个写法（加区名、去掉"附近"、用商场名）再试。</div>
+               ${addrRows}
+               <button class="btn btn-soft btn-block mt-10" data-act="regeo-all">全部重新解析</button>
+             </div>`
+          : ""
+      }
     `,
     actions: {
       async "save-home"() {
@@ -806,16 +848,22 @@ export function geoPage() {
         navigator.geolocation.getCurrentPosition(
           async (pos) => {
             const { longitude, latitude } = pos.coords;
+            // 手机给的是 WGS-84，高德用 GCJ-02：必须转，否则距离会差几百米
+            const gcj = wgs84ToGcj02(longitude, latitude);
             let addr = "";
             if (isConfigured()) {
               try {
-                addr = await reverseGeocode(longitude, latitude);
+                addr = await reverseGeocode(gcj.lng, gcj.lat);
               } catch (_) {
                 addr = "";
               }
             }
-            setHome({ address: addr || `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`, lng: longitude, lat: latitude });
-            toast(addr ? "定位好了" : "存了坐标，地址可以自己补一句", "ok");
+            setHome({
+              address: addr || `${gcj.lat.toFixed(4)}, ${gcj.lng.toFixed(4)}`,
+              lng: gcj.lng,
+              lat: gcj.lat,
+            });
+            toast(addr ? "定位好了（已换算成高德坐标）" : "存了坐标，地址可以自己补一句", "ok");
             rerender();
           },
           (err) => {
@@ -840,6 +888,12 @@ export function geoPage() {
         }
         setGeoConfig({ key, security: sec });
         toast("Key 存好了", "ok");
+        rerender();
+      },
+
+      "regeo-all"() {
+        clearGeoCache();
+        toast("缓存清空了，正在重新解析…");
         rerender();
       },
 
