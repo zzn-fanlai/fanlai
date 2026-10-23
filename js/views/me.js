@@ -35,7 +35,7 @@ import {
 import { permissionLabel, ask as askNotify, systemNotify, vibrate } from "../lib/notify.js";
 import { pushSupported, markedOn, enablePush, disablePush } from "../lib/push.js";
 
-const APP_VERSION = "1.5.2";
+const APP_VERSION = "1.5.3";
 
 /* ---------- 地址 / 提醒 的状态摘要（"我的"首页用） ---------- */
 function geoSummary() {

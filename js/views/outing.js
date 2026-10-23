@@ -202,9 +202,21 @@ export function home({ kind }) {
       async "decline-invite"(el) {
         const inv = store.get("invites", el.dataset.id);
         if (!inv) return;
-        // 直接回绝（不再弹窗问理由，减少弹层依赖）
-        decideInvite(inv, false, "");
-        toast("已回绝，TA 会看到");
+        const name = (inv.restaurant_snapshot && inv.restaurant_snapshot.name) || "这家店";
+        const note = await askText({
+          title: `不想去「${name}」`,
+          desc: "写一句理由，TA 会在卡片上看到；也可以留空直接回绝",
+          placeholder: "那天要加班 / 太远了 / 想吃别的",
+          multiline: true,
+          maxlength: 60,
+          optional: true,
+          ok: "回绝",
+          cancel: "再想想",
+        });
+        if (note === null) return; // 点了「再想想」
+        const reason = String(note || "").trim();
+        decideInvite(inv, false, reason);
+        toast(reason ? "已回绝，理由也发给 TA 了" : "已回绝", "ok");
       },
       "cancel-invite"(el) {
         const inv = store.get("invites", el.dataset.id);

@@ -441,6 +441,7 @@ function startReminders() {
         by: i.updated_by || "",
         kind: i.kind,
         name: (i.restaurant_snapshot && i.restaurant_snapshot.name) || "那家店",
+        reason: i.decision_note || "",
       });
     });
     (store.state.data.requests || []).forEach((r) => {
@@ -480,10 +481,11 @@ function startReminders() {
             notify: { title: "饭来 · 邀约成了", body: v.name },
           });
         } else if (old && v.status === "declined") {
+          const why = v.reason ? ` · ${v.reason}` : "，换个地方？";
           events.push({
             tag: "invite-declined",
-            banner: { emoji: "😕", title: "邀约被拒了", body: `${v.name}，换个地方？`, href: `#/${v.kind}` },
-            notify: { title: "饭来 · 邀约被拒", body: v.name },
+            banner: { emoji: "😕", title: "邀约被拒了", body: `${v.name}${why}`, href: `#/${v.kind}` },
+            notify: { title: "饭来 · 邀约被拒", body: `${v.name}${v.reason ? " · " + v.reason : ""}` },
           });
         }
       } else {
