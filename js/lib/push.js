@@ -61,6 +61,29 @@ async function getReg() {
   return navigator.serviceWorker.ready;
 }
 
+/** 检查 Supabase 里 push_subs 表是否存在，失败时给能照着做的提示 */
+async function assertTableReady(c) {
+  let res;
+  try {
+    res = await fetch(`${c.url}/rest/v1/push_subs?select=endpoint&limit=1`, {
+      headers: { apikey: c.key, Authorization: `Bearer ${c.key}` },
+    });
+  } catch (err) {
+    throw new Error(`连不上 Supabase：${err?.message || err}`);
+  }
+  if (res.status === 404) {
+    throw new Error(
+      "云端还没建推送订阅表 —— 先去 Supabase 的 SQL Editor 执行 supabase/push.sql（只要这一步，函数和 Webhook 之后再做也行）"
+    );
+  }
+  if (res.status === 401 || res.status === 403) {
+    throw new Error("Supabase key 没权限（401/403）—— 检查「我的 → 同步设置」里的 key 是不是 Publishable/anon");
+  }
+  if (!res.ok) {
+    throw new Error(`检查订阅表失败 ${res.status}`);
+  }
+}
+
 export async function currentSubscription() {
   if (!pushSupported()) return null;
   try {
@@ -81,6 +104,9 @@ export async function enablePush({ roomCode, deviceId, role }) {
   const c = sync.config();
   if (!c.url || !c.key) throw new Error("还没配置云端同步 —— 推送要靠它存订阅，先到「我的 → 同步设置」填好");
 
+  // 先确认表建好了：表不存在时给明确提示，而不是让用户去猜 404
+  await assertTableReady(c);
+
   // 权限（必须在用户点击里调用）
   let perm = Notification.permission;
   if (perm !== "granted") perm = await Notification.requestPermission();
@@ -89,10 +115,21 @@ export async function enablePush({ roomCode, deviceId, role }) {
   const reg = await getReg();
   let sub = await reg.pushManager.getSubscription();
   if (!sub) {
-    sub = await reg.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: b64ToBytes(VAPID_PUBLIC),
-    });
+    try {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: b64ToBytes(VAPID_PUBLIC),
+      });
+    } catch (err) {
+      const msg = String(err?.message || err);
+      // 安卓 Chrome 的推送通道是 Google FCM，国内/无 GMS 机型连不上就是这句
+      if (/push service error|Registration failed|AbortError/i.test(msg)) {
+        throw new Error(
+          "这台手机连不上推送通道（安卓走 Google FCM，国内多数机型被拦）。安卓用站内红点+横幅就够了；iPhone 装到桌面后可以开真推送。"
+        );
+      }
+      throw new Error(`订阅失败：${msg}`);
+    }
   }
 
   const json = sub.toJSON ? sub.toJSON() : sub;

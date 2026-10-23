@@ -1,4 +1,4 @@
-/* ============================================================
+﻿/* ============================================================
    饭来 · 我的：资料 / 同步设置 / 备份 / 关于
    ============================================================ */
 import { store, select } from "../store.js";
@@ -35,7 +35,7 @@ import {
 import { permissionLabel, ask as askNotify, systemNotify, vibrate } from "../lib/notify.js";
 import { pushSupported, markedOn, enablePush, disablePush } from "../lib/push.js";
 
-const APP_VERSION = "1.5.0";
+const APP_VERSION = "1.5.2";
 
 /* ---------- 地址 / 提醒 的状态摘要（"我的"首页用） ---------- */
 function geoSummary() {
@@ -925,6 +925,42 @@ export function geoPage() {
 /* ============================================================
    消息提醒
    ============================================================ */
+/** 后台推送那张卡的内容：按平台给出能真的照做的说法 */
+function pushCardHtml() {
+  const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
+  const isAndroid = /Android/i.test(ua);
+
+  if (!pushSupported()) {
+    return notice(
+      "这台设备不支持后台推送。iPhone 需要先「添加到主屏幕」，再从<b>桌面图标</b>打开（iOS 16.4 以上）。",
+      "warn"
+    );
+  }
+
+  if (markedOn()) {
+    return (
+      notice("已开启：即使 App 被划掉，通知栏也会收到。", "ok") +
+      `<button class="btn btn-ghost btn-block mt-10" data-act="disable-push">关闭后台推送</button>`
+    );
+  }
+
+  // 安卓：推送通道依赖 Google FCM，国内机型基本连不上，提前说清楚，别让人以为是配置错
+  if (isAndroid) {
+    return (
+      notice(
+        "安卓的推送通道走 Google 服务（FCM），红米这类没有 Google 服务的机型连不上 —— 这不是你设置错了。" +
+          "安卓用<b>站内红点 + 横幅</b>就够了；想收到通知栏消息，用 iPhone 从桌面图标打开再开这个。",
+        "warn"
+      ) + `<button class="btn btn-ghost btn-block mt-10" data-act="enable-push">仍然尝试开启</button>`
+    );
+  }
+
+  return (
+    notice("还没开启。开启后由服务器在你俩数据变化时直接推到通知栏。", "") +
+    `<button class="btn btn-primary btn-block mt-10" data-act="enable-push">开启后台推送</button>`
+  );
+}
+
 export function notifyPage() {
   const label = permissionLabel();
 
@@ -948,21 +984,8 @@ export function notifyPage() {
 
       <div class="card mt-10">
         <div class="card-title">📡 后台推送（App 关掉也能收到）</div>
-        ${
-          pushSupported()
-            ? markedOn()
-              ? notice("已开启：即使 App 被划掉，通知栏也会收到。", "ok")
-              : notice("还没开启。开启后由服务器在你俩数据变化时直接推到手机通知栏。", "")
-            : notice("这台设备不支持后台推送（iPhone 需要先「添加到主屏幕」，再从桌面图标打开）", "warn")
-        }
-        ${
-          pushSupported()
-            ? markedOn()
-              ? `<button class="btn btn-ghost btn-block mt-10" data-act="disable-push">关闭后台推送</button>`
-              : `<button class="btn btn-primary btn-block mt-10" data-act="enable-push">开启后台推送</button>`
-            : ""
-        }
-        <div class="hint mt-6">需要先填好「我的 → 同步设置」。安卓 Chrome 不用装到桌面；iPhone 必须在桌面图标里打开。</div>
+        ${pushCardHtml()}
+        <div class="hint mt-6">需要先填好「我的 → 同步设置」。</div>
       </div>
 
       <div class="card flat mt-16">
