@@ -1,4 +1,4 @@
-﻿/* ============================================================
+/* ============================================================
    饭来 · 我的：资料 / 同步设置 / 备份 / 关于
    ============================================================ */
 import { store, select } from "../store.js";
@@ -33,8 +33,9 @@ import {
   distanceText,
 } from "../lib/geo.js";
 import { permissionLabel, ask as askNotify, systemNotify, vibrate } from "../lib/notify.js";
+import { pushSupported, markedOn, enablePush, disablePush } from "../lib/push.js";
 
-const APP_VERSION = "1.4.3";
+const APP_VERSION = "1.5.0";
 
 /* ---------- 地址 / 提醒 的状态摘要（"我的"首页用） ---------- */
 function geoSummary() {
@@ -945,13 +946,36 @@ export function notifyPage() {
         <button class="btn btn-soft btn-block mt-6" data-act="test-notify">发一条测试提醒</button>
       </div>
 
+      <div class="card mt-10">
+        <div class="card-title">📡 后台推送（App 关掉也能收到）</div>
+        ${
+          pushSupported()
+            ? markedOn()
+              ? notice("已开启：即使 App 被划掉，通知栏也会收到。", "ok")
+              : notice("还没开启。开启后由服务器在你俩数据变化时直接推到手机通知栏。", "")
+            : notice("这台设备不支持后台推送（iPhone 需要先「添加到主屏幕」，再从桌面图标打开）", "warn")
+        }
+        ${
+          pushSupported()
+            ? markedOn()
+              ? `<button class="btn btn-ghost btn-block mt-10" data-act="disable-push">关闭后台推送</button>`
+              : `<button class="btn btn-primary btn-block mt-10" data-act="enable-push">开启后台推送</button>`
+            : ""
+        }
+        <div class="hint mt-6">需要先填好「我的 → 同步设置」。安卓 Chrome 不用装到桌面；iPhone 必须在桌面图标里打开。</div>
+      </div>
+
       <div class="card flat mt-16">
         <div class="small muted" style="line-height:1.9">
-          提醒分三层，按手机能力自动降级：<br>
+          提醒分三层，按设备能力自动降级：<br>
           ① <b>站内横幅</b> —— 页面开着时，顶部滑下来一条，点一下直接跳过去<br>
           ② <b>系统通知</b> —— App 切到后台时弹在通知栏（需要允许一次通知权限）<br>
           ③ <b>振动</b> —— 手机上配合横幅轻震一下<br><br>
-          ⚠️ App 完全关掉后收不到 —— 那需要服务器推送（要额外部署），这次没做。
+          <b>为什么后台时可能收不到：</b><br>
+          · 安卓：切到后台后浏览器会把网页的定时器压到一分钟以上，数据来不及时就没有可提醒的东西<br>
+          · 苹果：<b>必须先「添加到主屏幕」</b>，从 Safari 标签页打开时系统不发放通知<br>
+          · 两端都一样：App 被完全杀掉后，网页无法自己醒来<br><br>
+          ✅ 上面那张「后台推送」就是服务器推送：部署好并开启后，<b>关掉 App 也能收到</b>。
         </div>
       </div>
     `,
@@ -968,6 +992,28 @@ export function notifyPage() {
         } else {
           toast("没有授权成功");
         }
+        rerender();
+      },
+
+      async "enable-push"() {
+        try {
+          const room = store.state.room?.code || "";
+          if (!room) throw new Error("还没进房间 —— 先开个房间或加入对方的房间");
+          await enablePush({
+            roomCode: room,
+            deviceId: store.state.profile?.deviceId || "",
+            role: store.state.profile?.role || "",
+          });
+          toast("开启成功，关掉 App 也能收到了", "ok");
+          rerender();
+        } catch (err) {
+          toast(String(err?.message || err), "err");
+        }
+      },
+
+      async "disable-push"() {
+        await disablePush();
+        toast("已关闭后台推送");
         rerender();
       },
 
@@ -988,14 +1034,14 @@ export function notifyPage() {
           toast("横幅已经显示了；系统通知要先允许权限", res === "denied" ? "err" : "");
           return;
         }
-        const ok = systemNotify({
+        const ok = await systemNotify({
           title: "饭来 · 测试提醒",
           body: "看到这条说明通知通了",
           tag: "fanlai-test",
           href: "#/me",
           force: true,
         });
-        toast(ok ? "横幅 + 通知都发了，看看通知栏" : "这台设备不支持弹通知，横幅可用", ok ? "ok" : "err");
+        toast(ok ? "发出去了，看看通知栏" : "没能弹出通知，看下面的说明", ok ? "ok" : "err");
       },
     },
   };

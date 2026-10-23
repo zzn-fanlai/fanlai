@@ -35,19 +35,46 @@ export async function ask() {
 
 /**
  * 弹系统通知（页面不可见时才弹，可见时交给站内横幅，避免双份）
- * @returns {boolean} 是否真的弹了
+ * ------------------------------------------------------------
+ * ⚠️ 手机上必须用 ServiceWorkerRegistration.showNotification()：
+ *    直接 new Notification() 在几乎所有移动浏览器都会抛 TypeError（MDN 明确写了）。
+ *    这里先走 service worker，桌面上再退回构造函数。
+ * @returns {Promise<boolean>} 是否真的弹了
  */
-export function systemNotify({ title, body, tag = "fanlai", href = "", force = false }) {
+export async function systemNotify({ title, body, tag = "fanlai", href = "", force = false }) {
   if (!canSystem()) return false;
   if (!document.hidden && !force) return false;
+
+  const opts = {
+    body,
+    tag,
+    renotify: true,
+    icon: "./assets/icons/icon-192.png",
+    badge: "./assets/icons/icon-192.png",
+    data: { href },
+  };
+
+  // ① 优先 service worker（手机唯一可用的方式）
+  if (typeof navigator !== "undefined" && navigator.serviceWorker) {
+    try {
+      const reg =
+        (await navigator.serviceWorker.getRegistration?.()) ||
+        (await Promise.race([
+          navigator.serviceWorker.ready,
+          new Promise((r) => setTimeout(() => r(null), 3000)),
+        ]));
+      if (reg && typeof reg.showNotification === "function") {
+        await reg.showNotification(title, opts);
+        return true;
+      }
+    } catch (_) {
+      /* 继续走下面的兜底 */
+    }
+  }
+
+  // ② 桌面浏览器兜底（手机上这里会抛，直接吞掉）
   try {
-    const n = new Notification(title, {
-      body,
-      tag,
-      renotify: true,
-      icon: "./assets/icons/icon-192.png",
-      badge: "./assets/icons/icon-192.png",
-    });
+    const n = new Notification(title, opts);
     n.onclick = () => {
       try {
         window.focus();

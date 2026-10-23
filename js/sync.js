@@ -147,7 +147,8 @@ export const sync = {
   start() {
     if (timer) return;
     const tick = () => {
-      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      // 以前这里在 hidden 时直接 return，等于后台完全不拉数据，
+      // 导致"切到后台就收不到任何提醒"。现在照常拉（浏览器自己会限流）。
       this.run();
     };
     timer = setInterval(tick, PULL_INTERVAL);

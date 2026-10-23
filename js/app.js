@@ -420,7 +420,7 @@ function fireReminder(ev) {
     body: ev.notify.body,
     tag: ev.tag,
     href: ev.banner.href,
-  });
+  }).catch(() => false);
   vibrate();
   return pushed;
 }

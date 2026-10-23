@@ -6,7 +6,7 @@
    - Supabase API：直连网络，不缓存（数据必须新鲜）
    - 导航请求：先走缓存，失败回退 index.html
    ============================================================ */
-const VERSION = "fanlai-v1.4.3";
+const VERSION = "fanlai-v1.5.0";
 const SHELL = [
   "./",
   "./index.html",
@@ -22,6 +22,7 @@ const SHELL = [
   "./js/lib/ingredients.js",
   "./js/lib/geo.js",
   "./js/lib/notify.js",
+  "./js/lib/push.js",
   "./js/lib/parse.js",
   "./js/lib/ocr.js",
   "./js/lib/model.js",
@@ -112,4 +113,54 @@ self.addEventListener("fetch", (event) => {
 
 self.addEventListener("message", (event) => {
   if (event.data === "skip-waiting") self.skipWaiting();
+});
+
+/* ---------- 通知点击：把 App 拉到前台并跳到对应页面 ---------- */
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const href = (event.notification.data && event.notification.data.href) || "";
+  const target = "./index.html" + (href || "");
+
+  event.waitUntil(
+    (async () => {
+      const list = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+      for (const client of list) {
+        if ("focus" in client) {
+          try {
+            await client.focus();
+          } catch (_) {}
+          if (href) {
+            try {
+              await client.navigate(target);
+            } catch (_) {}
+          }
+          return;
+        }
+      }
+      if (self.clients.openWindow) await self.clients.openWindow(target);
+    })()
+  );
+});
+
+/* ---------- 预留：真正的服务器推送（Web Push）在这里接 ---------- */
+self.addEventListener("push", (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch (_) {
+    data = {};
+  }
+  const title = data.title || "饭来";
+  const body = data.body || "";
+  const href = data.href || "#/cook";
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body,
+      icon: "./assets/icons/icon-192.png",
+      badge: "./assets/icons/icon-192.png",
+      tag: data.tag || "fanlai-push",
+      renotify: true,
+      data: { href },
+    })
+  );
 });
